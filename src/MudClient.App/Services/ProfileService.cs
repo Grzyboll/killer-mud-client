@@ -88,6 +88,18 @@ public sealed class ProfileService
         File.WriteAllText(GetPath(profile.Name), json);
     }
 
+    /// <summary>
+    /// Last-write timestamp of a profile's file, or null if it doesn't exist yet.
+    /// Lets a caller detect that the file changed on disk since it last loaded or
+    /// saved it — e.g. another running instance of the client saved the same
+    /// profile in the meantime — without having to read and compare its content.
+    /// </summary>
+    public DateTime? GetLastWriteTimeUtc(string name)
+    {
+        var path = GetPath(name);
+        return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+    }
+
     public GlobalData LoadGlobal()
     {
         var path = Path.Combine(_directory, GlobalFileName + ".json");
@@ -112,6 +124,13 @@ public sealed class ProfileService
         Directory.CreateDirectory(_directory);
         var json = JsonSerializer.Serialize(data, SerializerOptions);
         File.WriteAllText(Path.Combine(_directory, GlobalFileName + ".json"), json);
+    }
+
+    /// <summary>Same as <see cref="GetLastWriteTimeUtc"/>, but for the shared global file.</summary>
+    public DateTime? GetGlobalLastWriteTimeUtc()
+    {
+        var path = Path.Combine(_directory, GlobalFileName + ".json");
+        return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
     }
 
     private string GetPath(string name) => Path.Combine(_directory, Sanitize(name) + ".json");

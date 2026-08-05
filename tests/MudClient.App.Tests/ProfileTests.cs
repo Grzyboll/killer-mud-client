@@ -140,6 +140,50 @@ public sealed class ProfileTests : IDisposable
     }
 
     [Fact]
+    public void GetLastWriteTimeUtc_MissingProfile_ReturnsNull()
+    {
+        Assert.Null(CreateService().GetLastWriteTimeUtc("nie-istnieje"));
+    }
+
+    [Fact]
+    public void GetLastWriteTimeUtc_ExistingProfile_ReturnsNonNullTimestamp()
+    {
+        var service = CreateService();
+        service.Save(new ProfileData { Name = "Gandalf" });
+
+        Assert.NotNull(service.GetLastWriteTimeUtc("Gandalf"));
+    }
+
+    [Fact]
+    public void GetLastWriteTimeUtc_ChangesAfterASecondSave()
+    {
+        var service = CreateService();
+        service.Save(new ProfileData { Name = "Gandalf" });
+        var first = service.GetLastWriteTimeUtc("Gandalf");
+
+        Thread.Sleep(20);
+        service.Save(new ProfileData { Name = "Gandalf", Host = "changed" });
+        var second = service.GetLastWriteTimeUtc("Gandalf");
+
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void GetGlobalLastWriteTimeUtc_MissingFile_ReturnsNull()
+    {
+        Assert.Null(CreateService().GetGlobalLastWriteTimeUtc());
+    }
+
+    [Fact]
+    public void GetGlobalLastWriteTimeUtc_ExistingFile_ReturnsNonNullTimestamp()
+    {
+        var service = CreateService();
+        service.SaveGlobal(new GlobalData());
+
+        Assert.NotNull(service.GetGlobalLastWriteTimeUtc());
+    }
+
+    [Fact]
     public void Save_ProfileNamedLikeGlobalFile_DoesNotOverwriteGlobalData()
     {
         var service = CreateService();

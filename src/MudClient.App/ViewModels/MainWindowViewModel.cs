@@ -216,6 +216,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private bool _activeProfileNeedsRegistration;
 
+    /// <summary>
+    /// Last-write timestamp of the active profile's file as of the last time this
+    /// instance loaded or saved it. Used to detect that another running instance of
+    /// the client saved the same profile in the meantime, so a blind overwrite from
+    /// here would silently discard that instance's changes.
+    /// </summary>
+    private DateTime? _activeProfileLastKnownWriteUtc;
+
+    /// <summary>Same as <see cref="_activeProfileLastKnownWriteUtc"/>, but for the shared global file.</summary>
+    private DateTime? _globalLastKnownWriteUtc;
+
     public MainWindowViewModel(
         ProfileService? profileService = null,
         AppSettingsService? settingsService = null,
@@ -4387,6 +4398,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _activeProfileLogin = string.Empty;
         _activeProfilePassword = string.Empty;
         _activeProfileNeedsRegistration = false;
+        _activeProfileLastKnownWriteUtc = null;
     }
 
     private void ActivateProfile(ProfileData profile)
@@ -4498,6 +4510,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Host = ResolveProfileHost(profile);
         Port = ResolveProfilePort(profile);
         Encoding = ResolveProfileEncoding(profile);
+        _activeProfileLastKnownWriteUtc = _profiles.GetLastWriteTimeUtc(profile.Name);
 
         ActiveProfileName = profile.Name;
         _suppressTreeRebuild = false;
@@ -4526,6 +4539,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void LoadGlobalEntries()
     {
         var global = _profiles.LoadGlobal();
+        _globalLastKnownWriteUtc = _profiles.GetGlobalLastWriteTimeUtc();
 
         foreach (var folder in global.Folders)
         {
@@ -4667,9 +4681,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             Folders = Folders.Where(f => f.IsGlobal).Select(ToProfileFolder).ToList(),
         };
 
+        WarnIfChangedSinceLoad(_globalLastKnownWriteUtc, _profiles.GetGlobalLastWriteTimeUtc(), "Dane globalne");
+
         try
         {
             _profiles.SaveGlobal(global);
+            _globalLastKnownWriteUtc = _profiles.GetGlobalLastWriteTimeUtc();
         }
         catch (Exception exception)
         {
@@ -4710,13 +4727,34 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             NeedsRegistration = _activeProfileNeedsRegistration,
         };
 
+        WarnIfChangedSinceLoad(
+            _activeProfileLastKnownWriteUtc,
+            _profiles.GetLastWriteTimeUtc(profile.Name),
+            $"Dane konta „{profile.Name}”");
+
         try
         {
             _profiles.Save(profile);
+            _activeProfileLastKnownWriteUtc = _profiles.GetLastWriteTimeUtc(profile.Name);
         }
         catch (Exception exception)
         {
             AddToast($"Nie udało się zapisać konta: {exception.Message}", "error");
+        }
+    }
+
+    /// <summary>
+    /// Warns when a profile/global file changed on disk after this instance last loaded
+    /// or saved it — most likely another running instance of the client saved the same
+    /// data in the meantime, so the save about to happen here would silently overwrite it.
+    /// </summary>
+    private void WarnIfChangedSinceLoad(DateTime? lastKnownWriteUtc, DateTime? currentWriteUtc, string subject)
+    {
+        if (lastKnownWriteUtc is { } known && currentWriteUtc is { } current && current != known)
+        {
+            AddToast(
+                $"{subject} zostały zmienione przez inną instancję klienta od czasu ostatniego wczytania — ten zapis mógł nadpisać te zmiany.",
+                "warning");
         }
     }
 

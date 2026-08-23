@@ -22,7 +22,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Uruchamiany osobno na windows-latest — Avalonia.Headless.XUnit ma znany wyścig
+  # przy reinicjalizacji sesji testowej między klasami testów, który na ubuntu-latest
+  # sporadycznie wywala losowy test (ten fork i tak wspiera/publikuje tylko Windows,
+  # więc to też jest platforma docelowa). Blokuje `release`, więc nieudany test nie
+  # zdąży już podbić wersji ani wypchnąć taga — bez osieroconych tagów po failu.
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test KillerMudClient.sln --configuration Release
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,9 +111,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "KillerMudClient $FULL_VERSION"
           git push origin "$TAG"
-
-      - name: Test
-        run: dotnet test KillerMudClient.sln --configuration Release
 
       - name: Publish Windows build
         run: |

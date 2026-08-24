@@ -293,6 +293,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     // life once GMCP reports the character has left the "fighting" position.
     private bool _autowalkPausedForCombat;
 
+    // Set while an active walk is on hold because the player consciously rested
+    // mid-route ("rest") — resting doesn't move the character, so without this
+    // the stuck-step backstop (MonitorAutowalkStepStuckAsync) would mistake the
+    // stall for a blocked door and start knocking/pulling/pushing before
+    // resending the movement command anyway.
+    private bool _autowalkPausedForResting;
+
     // --- Required buffs ---
     private string _newBuffName = string.Empty;
     private string _newBuffSetName = string.Empty;
@@ -3955,6 +3962,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _autowalkGateCommandsSent = false;
         _autowalkGateIsOpen = false;
         _autowalkPausedForCombat = false;
+        _autowalkPausedForResting = false;
     }
 
     private void SendAutowalkStep(bool skipMovementCheck = false)
@@ -3965,7 +3973,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (_autowalkWaitingForGate || _autowalkRecoveringMovement ||
-            _autowalkRecoveringPosition || _autowalkPausedForCombat)
+            _autowalkRecoveringPosition || _autowalkPausedForCombat || _autowalkPausedForResting)
         {
             return;
         }
@@ -4047,10 +4055,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (_autowalkWaitingForGate || _autowalkRecoveringMovement ||
-            _autowalkRecoveringPosition || _autowalkPausedForCombat)
+            _autowalkRecoveringPosition || _autowalkPausedForCombat || _autowalkPausedForResting)
         {
             // Another recovery path already owns this step (e.g. a recognized
-            // "brama...zamknięta" line already armed the GMCP gate-reopen wait).
+            // "brama...zamknięta" line already armed the GMCP gate-reopen wait,
+            // or the player consciously rested mid-route).
             return;
         }
 
@@ -4347,6 +4356,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // A room actually changed, so the walk is moving again — any combat
             // pause (e.g. after fleeing) no longer applies.
             _autowalkPausedForCombat = false;
+            _autowalkPausedForResting = false;
 
             var steps = _autowalkPath.Steps;
             for (var i = _autowalkStep; i < steps.Count; i++)
@@ -7097,7 +7107,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _latestCharacterName,
         _latestCharacterPosition,
         Map.CurrentVnum,
-        Map.CurrentVnum is { } vnum ? Map.MapIndex?.FindFirstRoomByVnum(vnum)?.Name : null);
+        Map.CurrentVnum is { } vnum ? Map.MapIndex?.FindFirstRoomByVnum(vnum)?.Name : null,
+        SkillsOnCooldown);
 
     /// <summary>A script's <c>echo(text)</c> call — prints the same way a triggered command's own
     /// echo does. Fires from whichever thread ran the script (UI for an alias, network read loop
@@ -9453,6 +9464,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (nowResting && !wasResting)
         {
             TryAutoOrderGroupPosition("rest", _profileSettings.AutoRestOrderEnabled);
+            OnAutowalkRestingStarted();
+        }
+
+        if (wasResting && !nowResting)
+        {
+            OnAutowalkRestingEnded();
         }
 
         if (wasFighting && !nowFighting)
@@ -9509,6 +9526,44 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void OnAutowalkSitting()
     {
         Dispatcher.UIThread.Post(BeginAutowalkStandRecovery);
+    }
+
+    /// <summary>The player consciously rested mid-route — pause the walk rather than let the
+    /// stuck-step backstop mistake the stall for a blocked door (see
+    /// <see cref="_autowalkPausedForResting"/>). Runs on the network thread; posts the actual
+    /// state change to the UI thread like the sitting/combat handlers above.</summary>
+    private void OnAutowalkRestingStarted()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_autowalkPath is null || _autowalkStep >= _autowalkPath.Steps.Count)
+            {
+                return;
+            }
+
+            _autowalkPausedForResting = true;
+            AutowalkStatusText = $"Odpoczywasz — autowalk wstrzymany (cel „{_autowalkTargetName}”).";
+        });
+    }
+
+    /// <summary>Resumes a walk the player paused by resting. The step that was in flight never
+    /// advanced (resting doesn't move the character), so it's simply resent — SendAutowalkStep
+    /// re-checks the live position itself, so this is safe even if GMCP reports something other
+    /// than fully "standing" by the time this fires.</summary>
+    private void OnAutowalkRestingEnded()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_autowalkPausedForResting || _autowalkPath is null ||
+                _autowalkStep >= _autowalkPath.Steps.Count)
+            {
+                return;
+            }
+
+            _autowalkPausedForResting = false;
+            AutowalkStatusText = $"Wracam na trasę do „{_autowalkTargetName}”.";
+            SendAutowalkStep();
+        });
     }
 
     private void OnAutowalkStanding()

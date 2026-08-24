@@ -155,6 +155,88 @@ public sealed class AutowalkStuckStepTests
     }
 
     [AvaloniaFact]
+    public async Task HandleAutowalkStepStuck_PausedForResting_DoesNothing()
+    {
+        // The player consciously rested mid-route (see UpdateCharacterPosition's resting
+        // transition) — the generic stuck backstop must not mistake the stall for a blocked
+        // door and start knocking/pulling/pushing (zapukaj/pull/pociagnij/uderz) then resend
+        // the movement command anyway.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_autowalkStuckRecoveryAttempts", GetMaxStuckRecoveryAttempts());
+            SetPrivateField(viewModel, "_autowalkPausedForResting", true);
+
+            InvokePrivate(viewModel, "HandleAutowalkStepStuck", 0, CancellationToken.None);
+
+            Assert.True(viewModel.IsAutowalking);
+            Assert.DoesNotContain(2, viewModel.Map.AutoFarmExcludedRoomIds);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task UpdateCharacterPosition_ConsciousRestMidRoute_PausesAutowalkInsteadOfGateRecovery()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_latestCharacterPosition", "standing");
+
+            InvokePrivate(viewModel, "UpdateCharacterPosition", "resting");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(GetPrivateField<bool>(viewModel, "_autowalkPausedForResting"));
+            Assert.Contains("Odpoczyw", viewModel.AutowalkStatusText);
+
+            // With the pause flag set, the stuck backstop for the in-flight step must be inert.
+            InvokePrivate(viewModel, "HandleAutowalkStepStuck", 0, CancellationToken.None);
+            Assert.True(viewModel.IsAutowalking);
+            Assert.DoesNotContain(2, viewModel.Map.AutoFarmExcludedRoomIds);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task UpdateCharacterPosition_StandingUpAfterRest_ResumesAutowalk()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_latestCharacterPosition", "resting");
+            SetPrivateField(viewModel, "_autowalkPausedForResting", true);
+
+            InvokePrivate(viewModel, "UpdateCharacterPosition", "standing");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkPausedForResting"));
+            Assert.True(viewModel.IsAutowalking);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task HandleAutowalkStepStuck_ExceedsMaxAttempts_MarksRoomClosedAndStopsResumably()
     {
         var viewModel = CreateViewModel(out var directory);

@@ -13,7 +13,8 @@ public sealed record LuaGameState(
     string? CharacterName,
     string? Position,
     string? RoomVnum,
-    string? RoomName);
+    string? RoomName,
+    IReadOnlyList<string>? SkillsOnCooldown = null);
 
 /// <summary>
 /// Shared Lua environment for "script" aliases/triggers/timers (see
@@ -132,6 +133,23 @@ public sealed class LuaScriptEngine
             _script.Globals["position"] = state?.Position;
             _script.Globals["roomvnum"] = state?.RoomVnum;
             _script.Globals["roomname"] = state?.RoomName;
+
+            // Lookup table keyed by lower-cased skill name (matches how this MUD's Char.Skills
+            // .Timeout GMCP names skills) — skills_on_cooldown["smite evil"] is true while the
+            // skill can't be used, and nil/false once it's usable again (or was never learned).
+            var skillsOnCooldown = new Table(_script);
+            if (state?.SkillsOnCooldown is { } cooldowns)
+            {
+                foreach (var name in cooldowns)
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        skillsOnCooldown[name.Trim().ToLowerInvariant()] = true;
+                    }
+                }
+            }
+
+            _script.Globals["skills_on_cooldown"] = skillsOnCooldown;
 
             _script.DoString(source);
 

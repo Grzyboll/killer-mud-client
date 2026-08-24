@@ -85,4 +85,20 @@ public sealed class SpellKnowledgeParserTests
 
         Assert.Contains(results, r => r.Name == "transmute staff" && !r.Known);
     }
+
+    // ====================================================================
+    // Regression guard: a game update introduced "( + )" for a spell the player already
+    // has but cannot yet cast (e.g. still below the required level). It's a non-blank
+    // count, so the existing "known" check already covers it — this locks that in.
+    // ====================================================================
+
+    [Fact]
+    public void Parse_PlusMarkerCount_IsClassifiedAsKnown()
+    {
+        var chunk = "Krag 1: ( + ) charm person";
+
+        var results = SpellKnowledgeParser.Parse(chunk);
+
+        Assert.Contains(results, r => r.Name == "charm person" && r.Known);
+    }
 }

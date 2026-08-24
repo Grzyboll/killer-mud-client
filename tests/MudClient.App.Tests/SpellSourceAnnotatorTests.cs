@@ -157,4 +157,18 @@ public sealed class SpellSourceAnnotatorTests
 
         Assert.Equal(line, result);
     }
+
+    // A game update introduced "( + )" for a spell the player already has but cannot yet
+    // cast (e.g. still below the required level) — a non-blank count, so it's already
+    // "known" under the existing check and must not get a source annotation appended.
+    [Fact]
+    public void Annotate_PlusMarkerSpell_IsNotTreatedAsMissing()
+    {
+        var mobs = new[] { Mob("Rogaty demon", "charm person") };
+        var line = "Krag 1: ( + ) charm person";
+
+        var result = SpellSourceAnnotator.Annotate(line, mobs);
+
+        Assert.Equal(line, result);
+    }
 }

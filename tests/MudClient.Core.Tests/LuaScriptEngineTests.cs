@@ -128,6 +128,51 @@ public sealed class LuaScriptEngineTests
     }
 
     [Fact]
+    public void Run_SkillsOnCooldown_LookupTableReflectsCooldownState()
+    {
+        var engine = new LuaScriptEngine
+        {
+            GameStateProvider = () => new LuaGameState(
+                50, 100, 20, 40, "Frodo", "fighting", "6017", "Ciemny las",
+                SkillsOnCooldown: ["smite evil", "holy prayer"]),
+        };
+
+        var result = engine.Run(
+            "send(tostring(skills_on_cooldown[\"smite evil\"])) " +
+            "send(tostring(skills_on_cooldown[\"kick\"]))",
+            line: null, match: null);
+
+        Assert.Equal(["true", "nil"], result);
+    }
+
+    [Fact]
+    public void Run_SkillsOnCooldown_LookupIsCaseInsensitiveViaLowercasing()
+    {
+        var engine = new LuaScriptEngine
+        {
+            GameStateProvider = () => new LuaGameState(
+                null, null, null, null, null, null, null, null,
+                SkillsOnCooldown: ["Smite Evil"]),
+        };
+
+        var result = engine.Run("send(tostring(skills_on_cooldown[\"smite evil\"]))", line: null, match: null);
+
+        Assert.Equal(["true"], result);
+    }
+
+    [Fact]
+    public void Run_NoGameStateProvider_SkillsOnCooldownIsEmptyTableNotNil()
+    {
+        var engine = new LuaScriptEngine();
+
+        var result = engine.Run(
+            "send(tostring(skills_on_cooldown ~= nil)) send(tostring(skills_on_cooldown[\"x\"]))",
+            line: null, match: null);
+
+        Assert.Equal(["true", "nil"], result);
+    }
+
+    [Fact]
     public void Run_SyntaxError_ThrowsInterpreterException()
     {
         var engine = new LuaScriptEngine();

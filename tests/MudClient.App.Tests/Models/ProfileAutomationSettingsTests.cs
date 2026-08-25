@@ -47,6 +47,15 @@ public sealed class ProfileAutomationSettingsTests
     }
 
     [Fact]
+    public void Constructor_RemoteControlIsDisabledByDefaultWithNoCharacterName()
+    {
+        var settings = new ProfileAutomationSettings();
+
+        Assert.False(settings.RemoteControlEnabled);
+        Assert.Equal(string.Empty, settings.RemoteControlCharacterName);
+    }
+
+    [Fact]
     public void Constructor_AutoRecastOnLeaderSnapCommandsDefaultToRecast()
     {
         Assert.Equal("/recast", new ProfileAutomationSettings().AutoRecastOnLeaderSnapCommandsText);

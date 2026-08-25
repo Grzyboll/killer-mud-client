@@ -57,6 +57,17 @@
           </StackPanel>
 
           <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding RemoteControlEnabled}"
+                      Content="Zdalne sterowanie — wykonuj polecenia z „!” od drugiej postaci" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Gdy MUD blokuje komendę „order” komunikatem „Nie jesteś przywódcą tej grupy.”, to obejście: podana postać mówi (say) coś zaczynającego się od „!”, np. „!stand”, a klient wykonuje to jako komendę — bez potrzeby bycia liderem po żadnej ze stron. Zwykłe wypowiedzi tej postaci (bez „!”) zostają zwykłym czatem." />
+            <TextBlock Margin="0,6,0,0"
+                       Text="Postać, której polecenia wykonywać" />
+            <TextBox Text="{Binding RemoteControlCharacterName, UpdateSourceTrigger=PropertyChanged}"
+                     PlaceholderText="Np. Gandalf" />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
             <CheckBox IsChecked="{Binding AutoRecastOnLeaderSnapEnabled}"
                       Content="Autorecast — reaguj na pstryknięcie palcami lidera" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"

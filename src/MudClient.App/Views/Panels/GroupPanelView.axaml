@@ -39,7 +39,6 @@
                   <TextBlock Grid.Column="0" Text="{Binding LeaderMarker}"
                              Foreground="{StaticResource MudBrushGoldBright}" />
                   <TextBlock Grid.Column="1" Text="{Binding Name}"
-                             FontSize="12" FontWeight="SemiBold"
                              MaxWidth="140" TextTrimming="CharacterEllipsis"
                              ToolTip.Tip="{Binding Name}" />
                   <Border Grid.Column="2" Classes="mud-status-chip" Padding="4,0"

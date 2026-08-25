@@ -249,7 +249,7 @@ public sealed class AutoFarmTests
             ArriveAtDestination(viewModel);
 
             Assert.True(viewModel.IsAutoFarmActive);
-            Assert.Equal("Uzupełniam brakujące zaklęcia — odpoczywam.", viewModel.AutoFarmStatusText);
+            Assert.Equal("Uzupełniam zaklęcia/buffy — odpoczywam.", viewModel.AutoFarmStatusText);
         }
         finally
         {
@@ -468,10 +468,48 @@ public sealed class AutoFarmTests
     }
 
     [AvaloniaFact]
-    public async Task ArrivingAtARoom_WithoutEnteringCombat_DoesNotCastTheSequence()
+    public async Task ArrivingAtARoom_WithoutEnteringCombat_DoesNotCastOffensiveEntries()
     {
-        // Regression target: this used to fire on plain room entry, which wastes buffs on empty
-        // rooms the farm is just passing through. It must now wait for actual combat.
+        // Regression target: an offensive entry used to fire on plain room entry, which is
+        // pointless — there's no enemy to target yet. It must still wait for actual combat, even
+        // though a plain (self-buff) entry is now allowed to top itself up on room arrival too
+        // (see the sibling ArrivingAtARoom_WithExpiredBuff_ToppedUpByMaintenancePass test below).
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            viewModel.AutoFarmCastSpellsText = "!fireball";
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmRegions", Array.Empty<FarmRegion>());
+            SetPrivateField(viewModel, "_latestMemorizedSpells", new List<MemorizedSpell>
+            {
+                new(1, 1, "fireball", Memed: true, Meming: false),
+            });
+
+            ArriveAtDestination(viewModel);
+            for (var i = 0; i < 8; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.DoesNotContain(output, line => line.Contains("cast \"fireball\""));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ArrivingAtARoom_WithExpiredBuff_ToppedUpByMaintenancePass()
+    {
+        // "Zawsze zapamiętane" only guarantees the spell stays memorized — it doesn't by itself
+        // keep the buff active. A self-buff cast-sequence entry that's memorized but wore off
+        // between fights (no active-affect entry) must get refreshed by the farm's own room-hop
+        // maintenance pass, the same place missing memorization/heal recovery is handled, rather
+        // than staying down until the next fight happens to start.
         var viewModel = CreateViewModel(out var directory);
         var output = new List<string>();
         viewModel.OutputReceived += text => output.Add(text);
@@ -484,6 +522,40 @@ public sealed class AutoFarmTests
             {
                 new(1, 1, "armor", Memed: true, Meming: false),
             });
+
+            ArriveAtDestination(viewModel);
+            for (var i = 0; i < 8; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.Contains(output, line => line.Contains("cast \"armor\" self"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ArrivingAtARoom_WithAlreadyActiveBuff_DoesNotRecastIt()
+    {
+        // The maintenance pass must only top up a buff that's genuinely worn off — an already
+        // active one must not be spammed on every single room hop the farm makes.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            viewModel.AutoFarmCastSpellsText = "armor";
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmRegions", Array.Empty<FarmRegion>());
+            SetPrivateField(viewModel, "_latestMemorizedSpells", new List<MemorizedSpell>
+            {
+                new(1, 1, "armor", Memed: true, Meming: false),
+            });
+            GetPrivateField<HashSet<string>>(viewModel, "_activeAffectNames").Add("armor");
 
             ArriveAtDestination(viewModel);
             for (var i = 0; i < 8; i++)

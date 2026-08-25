@@ -4999,6 +4999,36 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         Assert.Contains("Idę do", _vm.AutowalkStatusText);
     }
 
+    /// <summary>Regression: BeginAutowalkStandRecovery is also reachable directly from
+    /// OnAutowalkSitting (a GMCP "sitting" transition), bypassing SendAutowalkStep's own guard —
+    /// without checking _autowalkRecoveringMovement too, a brief "sitting" report during the
+    /// automatic low-movement rest recovery (RecoverMovementAndContinueAsync, already resting and
+    /// awaiting its own delayed "stand") would force an early "stand", cutting the rest short and
+    /// leaving both recovery flags set at once.</summary>
+    [Fact]
+    public void BeginAutowalkStandRecovery_DuringLowMovementRest_DoesNotStand()
+    {
+        var from = CreateTestRoom(998, "998");
+        var to = CreateTestRoom(999, "999");
+        GetAutowalkPathField().SetValue(_vm, new MapPath
+        {
+            From = from,
+            To = to,
+            Steps = [new MapPathStep("north", to)],
+            TotalCost = 1,
+        });
+        typeof(MainWindowViewModel).GetField("_autowalkRecoveringMovement",
+            BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(_vm, true);
+
+        typeof(MainWindowViewModel).GetMethod("BeginAutowalkStandRecovery",
+            BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(_vm, null);
+
+        var recoveringPositionField = typeof(MainWindowViewModel).GetField(
+            "_autowalkRecoveringPosition",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Assert.False((bool)recoveringPositionField.GetValue(_vm)!);
+    }
+
     [Fact]
     public void OnMapRoomDoubleClicked_NoVnum_ShowsErrorToast()
     {

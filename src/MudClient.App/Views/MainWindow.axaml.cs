@@ -22,7 +22,11 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _pinnedPanelAuditCts;
     private bool _closingAfterRecoveryFlush;
     private readonly DispatcherTimer _idleRefreshTimer;
-    private DispatcherTimer? _chatFlashStopTimer;
+    private DispatcherTimer? _blueNotificationStopTimer;
+    private bool _isFighting;
+    private bool _redNotificationActive;
+    private bool _greenNotificationActive;
+    private bool _blueNotificationActive;
     internal Func<Window, string, string, Task<bool>> ConfirmDeletionAsync { get; set; } =
         DeleteConfirmationDialog.ShowAsync;
 
@@ -40,6 +44,8 @@ public partial class MainWindow : Window
 
         Opened += OnOpened;
         Activated += OnWindowActivated;
+        Deactivated += OnWindowDeactivated;
+        PropertyChanged += OnMainWindowPropertyChanged;
         Dispatcher.UIThread.UnhandledException += OnDispatcherUnhandledException;
         DataContextChanged += OnDataContextChanged;
 
@@ -109,8 +115,7 @@ public partial class MainWindow : Window
 
     private void OnWindowActivated(object? sender, EventArgs e)
     {
-        _chatFlashStopTimer?.Stop();
-        TaskbarFlashService.Stop(this);
+        ClearTaskbarNotifications();
 
         // A layout applied while minimized is audited once the Dock visual tree is visible again.
         SchedulePinnedPanelAudit();
@@ -147,6 +152,8 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _viewModel.ChatLineReceived -= OnChatLineReceivedForFlash;
+            _viewModel.CombatStateChanged -= OnCombatStateChangedForFlash;
+            _viewModel.AutomationFired -= OnAutomationFiredForFlash;
         }
 
         _viewModel = DataContext as MainWindowViewModel;
@@ -154,6 +161,8 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.ChatLineReceived += OnChatLineReceivedForFlash;
+            _viewModel.CombatStateChanged += OnCombatStateChangedForFlash;
+            _viewModel.AutomationFired += OnAutomationFiredForFlash;
             // Pinned edge tabs use fixed proportions of the live dock area: one third of its
             // width at the sides and half its height at the top/bottom. The view supplies the
             // dimensions because the UI-agnostic factory cannot see the rendered DockControl.
@@ -162,27 +171,141 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Flashes the taskbar icon for 5 seconds when a chat message arrives while the
-    /// window is not focused — mirrors the community Mudlet package's <c>alert(5)</c> behavior
-    /// for this MUD. <see cref="OnWindowActivated"/> cancels it early if the user refocuses
-    /// first.</summary>
+    /// <summary>Lights up the green taskbar-overlay badge when a chat message arrives while the
+    /// window is not focused — mirrors the community Mudlet package's <c>alert(5)</c> behavior for
+    /// this MUD, just with a distinct color instead of a generic blink. Stays lit indefinitely
+    /// (unlike the timed blue badge) — <see cref="OnWindowActivated"/> is what clears it, once the
+    /// player actually comes back to look.</summary>
     private void OnChatLineReceivedForFlash(string line)
     {
-        if (IsActive)
+        if (!IsHiddenFromView)
         {
             return;
         }
 
-        TaskbarFlashService.Start(this);
+        _greenNotificationActive = true;
+        UpdateTaskbarOverlay();
+    }
 
-        _chatFlashStopTimer?.Stop();
-        _chatFlashStopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _chatFlashStopTimer.Tick += (_, _) =>
+    /// <summary>Lights up the red taskbar-overlay badge while the window is hidden from view (see
+    /// <see cref="IsHiddenFromView"/>) and combat is ongoing (GMCP "fighting"); tracks
+    /// <see cref="_isFighting"/> so <see cref="OnWindowDeactivated"/>/<see cref="OnWindowStateChanged"/>
+    /// can also arm it if the window is hidden mid-fight rather than only when a fight starts while
+    /// already hidden. Clears the moment combat ends, regardless of visibility — unlike green and
+    /// blue, this one is tied to a game state, not a fixed duration or manual re-focus.</summary>
+    private void OnCombatStateChangedForFlash(bool isFighting)
+    {
+        _isFighting = isFighting;
+        if (isFighting)
         {
-            _chatFlashStopTimer?.Stop();
-            TaskbarFlashService.Stop(this);
+            if (IsHiddenFromView)
+            {
+                _redNotificationActive = true;
+                UpdateTaskbarOverlay();
+            }
+        }
+        else
+        {
+            _redNotificationActive = false;
+            UpdateTaskbarOverlay();
+        }
+    }
+
+    /// <summary>Lights up the blue taskbar-overlay badge for 15 seconds when a Trigger rule
+    /// matches or a Timer tick actually fires while the window is hidden from view. The
+    /// description itself is shown separately, always (visible or not), by the bottom status bar
+    /// bound directly to <see cref="MainWindowViewModel.RecentAutomationActivityText"/> — this
+    /// handler only cares that something fired, not what.</summary>
+    private void OnAutomationFiredForFlash(string description)
+    {
+        if (!IsHiddenFromView)
+        {
+            return;
+        }
+
+        _blueNotificationActive = true;
+        UpdateTaskbarOverlay();
+
+        _blueNotificationStopTimer?.Stop();
+        _blueNotificationStopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _blueNotificationStopTimer.Tick += (_, _) =>
+        {
+            _blueNotificationStopTimer?.Stop();
+            _blueNotificationActive = false;
+            UpdateTaskbarOverlay();
         };
-        _chatFlashStopTimer.Start();
+        _blueNotificationStopTimer.Start();
+    }
+
+    /// <summary>True once the window is either minimized or simply not the OS-focused window —
+    /// the single gate all three taskbar-overlay badges arm against. WindowState is checked
+    /// explicitly alongside IsActive because minimizing doesn't reliably raise Deactivated on
+    /// every platform (the window can stay the last "active" one at the OS level even once
+    /// minimized), so IsActive alone isn't a reliable signal for this specific case.</summary>
+    private bool IsHiddenFromView => WindowState == WindowState.Minimized || !IsActive;
+
+    private void OnWindowDeactivated(object? sender, EventArgs e)
+    {
+        if (_isFighting)
+        {
+            _redNotificationActive = true;
+            UpdateTaskbarOverlay();
+        }
+    }
+
+    /// <summary>Minimizing/restoring via the taskbar or window-chrome buttons doesn't always pair
+    /// with Activated/Deactivated (see <see cref="IsHiddenFromView"/>), so WindowState changes are
+    /// watched directly too: minimizing mid-fight arms red the same way losing focus does, and
+    /// restoring while actually focused clears everything the same way regaining focus does.</summary>
+    private void OnMainWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != WindowStateProperty)
+        {
+            return;
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            if (_isFighting)
+            {
+                _redNotificationActive = true;
+                UpdateTaskbarOverlay();
+            }
+        }
+        else if (IsActive)
+        {
+            ClearTaskbarNotifications();
+        }
+    }
+
+    private void ClearTaskbarNotifications()
+    {
+        _blueNotificationStopTimer?.Stop();
+        _redNotificationActive = false;
+        _greenNotificationActive = false;
+        _blueNotificationActive = false;
+        TaskbarOverlayIconService.SetState(this, TaskbarNotificationColor.None);
+    }
+
+    private void UpdateTaskbarOverlay()
+    {
+        var color = TaskbarNotificationColor.None;
+        if (_redNotificationActive)
+        {
+            color |= TaskbarNotificationColor.Red;
+        }
+
+        if (_greenNotificationActive)
+        {
+            color |= TaskbarNotificationColor.Green;
+        }
+
+        if (_blueNotificationActive)
+        {
+            color |= TaskbarNotificationColor.Blue;
+        }
+
+        TaskbarOverlayIconService.SetState(this, color);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)

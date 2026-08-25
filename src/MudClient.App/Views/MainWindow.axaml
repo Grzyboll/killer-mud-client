@@ -201,6 +201,23 @@
               IsVisible="{Binding Toasts.Count}" />
     </StackPanel>
 
+    <!-- ========================================================================
+         Row 2: recent automation activity ("Trigger: ...", "Timer: ..."), shown
+         for a few seconds and auto-cleared — see MainWindowViewModel's
+         RecentAutomationActivityText / ShowAutomationActivity.
+         ======================================================================== -->
+    <Border Grid.Row="2"
+            Classes="mud-bar-bottom"
+            Padding="10,5"
+            IsVisible="{Binding RecentAutomationActivityText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="⚡" />
+        <TextBlock Text="{Binding RecentAutomationActivityText}"
+                   Classes="mud-caption"
+                   TextTrimming="CharacterEllipsis" />
+      </StackPanel>
+    </Border>
+
     <controls:LargeTabbedWidget Grid.RowSpan="3"
                                 Title="Killeropedia"
                                 IsBookStyle="True"
@@ -320,6 +337,15 @@
                                Foreground="{StaticResource MudBrushGoldBright}" />
                     <TextBlock Grid.Column="1" TextWrapping="Wrap"
                                Text="Ponownie rzuca wszystkie brakujące czary z aktywnego zestawu buffów na postać." />
+                  </Grid>
+                </Border>
+
+                <Border Classes="mud-section" Padding="14">
+                  <Grid ColumnDefinitions="150,*" ColumnSpacing="18">
+                    <TextBlock Grid.Column="0" Text="/reconnect" FontWeight="Bold"
+                               Foreground="{StaticResource MudBrushGoldBright}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap"
+                               Text="Rozłącza i ponownie łączy z bieżącym profilem (razem z automatycznym logowaniem). Działa też z paska komend oraz z timerów, triggerów i aliasów przez send(&quot;/reconnect&quot;)." />
                   </Grid>
                 </Border>
 

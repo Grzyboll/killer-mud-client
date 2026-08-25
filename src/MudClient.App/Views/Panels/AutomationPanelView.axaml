@@ -283,6 +283,10 @@
                  Text="Brak timerów. Timer powtarza komendy w nieskończoność, dopóki go nie wyłączysz."
                  IsVisible="{Binding !Timers.Count}" />
 
+      <TextBox Text="{Binding TimerFilterText, UpdateSourceTrigger=PropertyChanged}"
+               PlaceholderText="Szukaj po nazwie lub komendach..."
+               IsVisible="{Binding Timers.Count}" />
+
       <controls:FolderTreeView Nodes="{Binding TimerTree}"
                                ItemTemplate="{StaticResource TimerItemTemplate}"
                                SupportsEnableToggle="True"
@@ -339,6 +343,10 @@
                  Text="Brak aliasów. Alias podmienia komendę, którą wpisujesz (np. skrót)."
                  IsVisible="{Binding !AliasRules.Count}" />
 
+      <TextBox Text="{Binding AliasFilterText, UpdateSourceTrigger=PropertyChanged}"
+               PlaceholderText="Szukaj po nazwie, wzorcu lub akcji..."
+               IsVisible="{Binding AliasRules.Count}" />
+
       <controls:FolderTreeView Nodes="{Binding AliasTree}"
                                ItemTemplate="{StaticResource RuleItemTemplate}"
                                SupportsEnableToggle="True"
@@ -394,6 +402,10 @@
       <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                  Text="Brak triggerów. Trigger wysyła akcję, gdy linia z serwera pasuje do wzorca."
                  IsVisible="{Binding !TriggerRules.Count}" />
+
+      <TextBox Text="{Binding TriggerFilterText, UpdateSourceTrigger=PropertyChanged}"
+               PlaceholderText="Szukaj po nazwie, wzorcu lub akcji..."
+               IsVisible="{Binding TriggerRules.Count}" />
 
       <controls:FolderTreeView Nodes="{Binding TriggerTree}"
                                ItemTemplate="{StaticResource RuleItemTemplate}"

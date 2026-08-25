@@ -59,6 +59,18 @@ public sealed class ProfileAutomationSettings
     /// <summary>Executes strictly formatted orders issued by current GMCP group members.</summary>
     public bool GroupOrdersEnabled { get; set; }
 
+    /// <summary>Executes as a literal command anything <see cref="RemoteControlCharacterName"/>
+    /// says with a "!" prefix (e.g. "!stand" -&gt; sends "stand") — a workaround for MUDs that
+    /// restrict the "order" command to the formal group leader (see
+    /// <see cref="Core.Automation.RemoteCommandPolicy"/>). Requires no group leadership, only
+    /// that the two characters can see each other's "say".</summary>
+    public bool RemoteControlEnabled { get; set; }
+
+    /// <summary>The one character whose "!"-prefixed say lines get executed — see
+    /// <see cref="RemoteControlEnabled"/>. Case-insensitive, empty disables the feature
+    /// regardless of the enabled flag.</summary>
+    public string RemoteControlCharacterName { get; set; } = string.Empty;
+
     /// <summary>Sends <see cref="AutoRecastOnLeaderSnapCommandsText"/> when the current GMCP
     /// group's leader sends the "snaps fingers" emote line.</summary>
     public bool AutoRecastOnLeaderSnapEnabled { get; set; }

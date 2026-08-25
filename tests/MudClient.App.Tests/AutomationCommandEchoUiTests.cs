@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
@@ -103,6 +105,83 @@ public sealed class AutomationCommandEchoUiTests
         }
         finally
         {
+            await DisposeAsync(viewModel, directory);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TriggeredReconnectCommand_WhileBusy_ShowsErrorAndDoesNotTouchConnection()
+    {
+        // The busy guard in ReconnectCurrentProfileAsync must short-circuit before touching
+        // _session at all — otherwise this test would need a real/loopback connection just to
+        // prove the guard works.
+        var (viewModel, directory) = CreateViewModel();
+        var output = new List<string>();
+        viewModel.OutputReceived += output.Add;
+
+        try
+        {
+            typeof(MainWindowViewModel).GetField("_isBusy", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(viewModel, true);
+
+            var method = typeof(MainWindowViewModel).GetMethod(
+                "SendTriggeredCommandAsync",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            await Assert.IsAssignableFrom<Task>(method!.Invoke(viewModel, ["/reconnect", CancellationToken.None]));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("zajęty", StringComparison.Ordinal));
+            Assert.DoesNotContain(output, line => line.Contains("> /reconnect", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await DisposeAsync(viewModel, directory);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TriggeredReconnectCommand_ReopensCurrentConnection()
+    {
+        // "/reconnect" (see MainWindowViewModel.ReconnectCurrentProfileAsync) disconnects and
+        // reconnects using the current profile's host/port. MudSession has no injectable transport
+        // seam (see MainWindowViewModelTests' "Auto-connect startup — validation notes"), so this
+        // exercises the real connect/disconnect cycle over a loopback TCP listener instead of
+        // mocking _session.
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var (viewModel, directory) = CreateViewModel();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        TcpClient? firstClient = null;
+        TcpClient? secondClient = null;
+
+        try
+        {
+            viewModel.Host = IPAddress.Loopback.ToString();
+            viewModel.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var firstAccept = listener.AcceptTcpClientAsync(timeout.Token);
+
+            await viewModel.ConnectCommand.ExecuteAsync(null);
+            firstClient = await firstAccept;
+            Assert.True(viewModel.IsConnected);
+
+            var secondAccept = listener.AcceptTcpClientAsync(timeout.Token);
+
+            var method = typeof(MainWindowViewModel).GetMethod(
+                "SendTriggeredCommandAsync",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+            await Assert.IsAssignableFrom<Task>(method!.Invoke(viewModel, ["/reconnect", CancellationToken.None]));
+
+            secondClient = await secondAccept;
+            Assert.True(viewModel.IsConnected);
+        }
+        finally
+        {
+            firstClient?.Dispose();
+            secondClient?.Dispose();
+            listener.Stop();
             await DisposeAsync(viewModel, directory);
         }
     }

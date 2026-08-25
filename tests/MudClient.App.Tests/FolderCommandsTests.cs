@@ -212,4 +212,101 @@ public sealed class FolderCommandsTests : IAsyncDisposable
 
         Assert.Null(timer.FolderId);
     }
+
+    // ====================================================================
+    // Live search/filter boxes (TimerFilterText / AliasFilterText / TriggerFilterText)
+    // ====================================================================
+
+    [Fact]
+    public void AliasFilterText_LooseItemNotMatching_IsHiddenFromTree()
+    {
+        _vm.AutomationRules.Add(new AutomationRuleEntry("boss-kill", "alias", "^k$", "kill", true));
+        _vm.AutomationRules.Add(new AutomationRuleEntry("heal-self", "alias", "^h$", "heal", true));
+
+        _vm.AliasFilterText = "boss";
+
+        var leaf = Assert.Single(_vm.AliasTree);
+        Assert.Equal("boss-kill", ((AutomationRuleEntry)leaf.Content!).Name);
+    }
+
+    [Fact]
+    public void AliasFilterText_MatchesPatternNotJustName()
+    {
+        // "gandalf" only appears in the pattern, not the name — search must look at both.
+        _vm.AutomationRules.Add(new AutomationRuleEntry("greet", "trigger", "gandalf mowi", "say hi", true));
+        _vm.AutomationRules.Add(new AutomationRuleEntry("other", "trigger", "^x$", "y", true));
+
+        _vm.TriggerFilterText = "gandalf";
+
+        var leaf = Assert.Single(_vm.TriggerTree);
+        Assert.Equal("greet", ((AutomationRuleEntry)leaf.Content!).Name);
+    }
+
+    [Fact]
+    public void TimerFilterText_MatchesCommandsTextNotJustName()
+    {
+        _vm.Timers.Add(new TimerEntry { Name = "Watch", Seconds = 5, CommandsText = "cast 'refresh' self" });
+        _vm.Timers.Add(new TimerEntry { Name = "Scan", Seconds = 5, CommandsText = "scan" });
+
+        _vm.TimerFilterText = "refresh";
+
+        var leaf = Assert.Single(_vm.TimerTree);
+        Assert.Equal("Watch", ((TimerEntry)leaf.Content!).Name);
+    }
+
+    [Fact]
+    public void AliasFilterText_ItemInsideFolder_KeepsAncestorFolderButPrunesSiblings()
+    {
+        _vm.CreateFolderCommand.Execute(FolderKind.Aliases);
+        var folder = _vm.Folders.Single();
+        AddAliasInFolder(folder); // Name "a" — matches nothing below
+        var matching = new AutomationRuleEntry("boss-kill", "alias", "^k$", "kill", true) { FolderId = folder.Id };
+        _vm.AutomationRules.Add(matching);
+
+        _vm.AliasFilterText = "boss";
+
+        var root = Assert.Single(_vm.AliasTree);
+        Assert.True(root.IsFolder);
+        var leaf = Assert.Single(root.Children);
+        Assert.Same(matching, leaf.Content);
+    }
+
+    [Fact]
+    public void AliasFilterText_FolderWithNoMatchingDescendants_IsHiddenEntirely()
+    {
+        _vm.CreateFolderCommand.Execute(FolderKind.Aliases);
+        var folder = _vm.Folders.Single();
+        AddAliasInFolder(folder); // Name "a" — never matches "boss"
+
+        _vm.AliasFilterText = "boss";
+
+        Assert.Empty(_vm.AliasTree);
+    }
+
+    [Fact]
+    public void AliasFilterText_ClearedAgain_RestoresFullTree()
+    {
+        _vm.AutomationRules.Add(new AutomationRuleEntry("boss-kill", "alias", "^k$", "kill", true));
+        _vm.AutomationRules.Add(new AutomationRuleEntry("heal-self", "alias", "^h$", "heal", true));
+        _vm.AliasFilterText = "boss";
+        Assert.Single(_vm.AliasTree);
+
+        _vm.AliasFilterText = string.Empty;
+
+        Assert.Equal(2, _vm.AliasTree.Count);
+    }
+
+    [Fact]
+    public void AliasFilterText_DoesNotAffectOtherSectionsTrees()
+    {
+        // Filtering aliases must not touch timers/triggers/notes/autowalk — RebuildFolderTrees
+        // rebuilds every tree, but only the aliases one carries a non-null filter predicate.
+        _vm.Timers.Add(new TimerEntry { Name = "Watch", Seconds = 5, CommandsText = "look" });
+        _vm.AutomationRules.Add(new AutomationRuleEntry("boss-kill", "alias", "^k$", "kill", true));
+
+        _vm.AliasFilterText = "does-not-match-anything";
+
+        Assert.Empty(_vm.AliasTree);
+        Assert.Single(_vm.TimerTree);
+    }
 }

@@ -88,7 +88,7 @@ aplikacji; `BookCatalogOutputPath` pozwala twórcy wskazać ścieżkę snapshotu
 ### Pomoc aplikacji
 
 Przycisk **Pomoc** w górnym pasku otwiera opis dostępnych komend klienta: `/idz`,
-`/idz <cel>`, `/idz_dodaj <nazwa>`, `/stop`, `/recast` oraz komend mappera `/map`.
+`/idz <cel>`, `/idz_dodaj <nazwa>`, `/stop`, `/recast`, `/reconnect` oraz komend mappera `/map`.
 W Trybie lorda mapper obsługuje `start`, `stop`, `save`, `undo`, `redo`, `cancel`,
 `status`, `info`, `check`, `diff`, `import`, `export`, `discard`, `resolve`,
 `step <1-20>`, `area`, `reassign`, `room`, `symbol`, `label`, `forget` i `special`; jako
@@ -120,6 +120,7 @@ aktualnej mapy bazowej. Konflikt połączenia można rozstrzygnąć przez
 - **Import i eksport** — pojedyncze aliasy, triggery i timery oraz całe drzewa ich folderów można przenosić w wersjonowanym formacie JSON; podczas importu identyfikatory folderów są bezpiecznie mapowane na nowe,
 - **Autoassist** — opcjonalne wysłanie `as`, gdy GMCP wskaże walczącego członka drużyny w bieżącym pokoju; po asyście może wykonać dodatkowe komendy rozdzielone nowymi liniami lub skonfigurowanym separatorem, a cała sekwencja jest ponawiana, jeśli postać przestanie walczyć i członek drużyny nadal walczy,
 - **Ordery** — opcjonalne wykonywanie komendy z komunikatu `Gracz rozkazuje ci 'komenda'.`, wyłącznie gdy nadawca jest członkiem aktualnej grupy GMCP,
+- **Zdalne sterowanie** — obejście dla MUD-a, który blokuje komendę `order` komunikatem `Nie jesteś przywódcą tej grupy.`: wskazana postać mówi (say) coś zaczynającego się od `!` (np. `!stand`), a klient wykonuje to jako komendę — bez potrzeby formalnego przywództwa po żadnej ze stron; zwykłe wypowiedzi tej postaci (bez `!`) zostają zwykłym czatem,
 - **Notatki** — panel na własne zapiski.
 
 ## Pobieranie

@@ -223,6 +223,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _autowalkStatusText = "Bezczynny.";
     private AutowalkLocation? _temporaryTarget;
 
+    // --- Recent automation activity (bottom status bar) ---
+    private static readonly TimeSpan AutomationActivityDisplayDuration = TimeSpan.FromSeconds(4);
+    private string? _recentAutomationActivityText;
+    private CancellationTokenSource? _automationActivityClearCts;
+
     // Destination of a walk that was cut short (lost route / off-course), so a
     // bare /walk can pick the journey back up. Cleared on arrival, explicit stop,
     // or when a new walk starts — only an abnormal interruption sets it.
@@ -1366,8 +1371,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Raised for every line recognized as player communication (say, sayto, tell,
     /// clantell, grouptell, yell, shout — see <see cref="ChatLinePolicy"/>), independent of
     /// whether the Chat panel is currently open. The Chat panel appends it to its own console;
-    /// the main window flashes the taskbar icon if it isn't focused.</summary>
+    /// the main window lights up the green taskbar-overlay badge if it isn't focused.</summary>
     public event Action<string>? ChatLineReceived;
+
+    /// <summary>Raised whenever the GMCP "fighting" position starts (true) or stops (false) — the
+    /// main window lights up the red taskbar-overlay badge while this is true and the window isn't
+    /// focused, and clears it the moment this fires false, regardless of focus.</summary>
+    public event Action<bool>? CombatStateChanged;
+
+    /// <summary>Raised whenever a user-defined Trigger rule matches a line, or a Timer tick
+    /// actually sends at least one command — carries a short human-readable description ("Trigger:
+    /// „Nazwa”" / "Timer: „Nazwa”") used both to light up the blue taskbar-overlay badge (main
+    /// window, if unfocused) and to show <see cref="RecentAutomationActivityText"/> in the bottom
+    /// status bar for a few seconds. Not raised for every internal command queued by other
+    /// automation (auto-assist orders, auto-recast, ...), only for a genuine Trigger/Timer firing,
+    /// matching what the player configured directly.</summary>
+    public event Action<string>? AutomationFired;
 
     /// <summary>Raised when a profile becomes active; the view auto-connects then.</summary>
     public event Action<string>? ProfileActivated;
@@ -2009,6 +2028,42 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
 
             _profileSettings.GroupOrdersEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.RemoteControlEnabled"/> — executes a
+    /// "!"-prefixed say from <see cref="RemoteControlCharacterName"/> as a literal command,
+    /// without needing that character (or this one) to be the group's formal leader.</summary>
+    public bool RemoteControlEnabled
+    {
+        get => _profileSettings.RemoteControlEnabled;
+        set
+        {
+            if (_profileSettings.RemoteControlEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.RemoteControlEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    public string RemoteControlCharacterName
+    {
+        get => _profileSettings.RemoteControlCharacterName;
+        set
+        {
+            var name = (value ?? string.Empty).Trim();
+            if (string.Equals(_profileSettings.RemoteControlCharacterName, name, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.RemoteControlCharacterName = name;
             OnPropertyChanged();
             SaveActiveProfile();
         }
@@ -3246,6 +3301,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (IsConnected && _bookRefreshCts is null && _rareRefreshCts is null && _mapujCts is null)
             {
                 var commands = staticCommands ?? RunScriptTimer(entry);
+                if (commands.Count > 0)
+                {
+                    var description = $"Timer: „{entry.Name}”";
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        AutomationFired?.Invoke(description);
+                        ShowAutomationActivity(description);
+                    });
+                }
+
                 foreach (var command in commands)
                 {
                     token.ThrowIfCancellationRequested();
@@ -3734,6 +3799,49 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _autowalkStatusText, value);
     }
 
+    /// <summary>Short-lived "Trigger: „Nazwa”" / "Timer: „Nazwa”" text for the bottom status bar
+    /// — set by <see cref="OnTriggerRuleMatched"/>/<see cref="SyncTimer"/> via
+    /// <see cref="ShowAutomationActivity"/>, cleared automatically a few seconds later. Null means
+    /// nothing recent to show, which the view uses to collapse the status bar entirely.</summary>
+    public string? RecentAutomationActivityText
+    {
+        get => _recentAutomationActivityText;
+        private set => SetProperty(ref _recentAutomationActivityText, value);
+    }
+
+    /// <summary>Shows <paramref name="description"/> in <see cref="RecentAutomationActivityText"/>
+    /// and clears it again after <see cref="AutomationActivityDisplayDuration"/> — a later call
+    /// while one is already pending restarts the timer rather than stacking, so a busy stretch of
+    /// firings just keeps refreshing the same short-lived line instead of queuing a backlog.</summary>
+    private void ShowAutomationActivity(string description)
+    {
+        RecentAutomationActivityText = description;
+
+        _automationActivityClearCts?.Cancel();
+        _automationActivityClearCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _automationActivityClearCts = cts;
+        _ = ClearAutomationActivityAfterDelayAsync(description, cts.Token);
+    }
+
+    private async Task ClearAutomationActivityAfterDelayAsync(string description, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(AutomationActivityDisplayDuration, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        // Only clear if nothing newer has already replaced this line while we were waiting.
+        if (!cancellationToken.IsCancellationRequested && RecentAutomationActivityText == description)
+        {
+            RecentAutomationActivityText = null;
+        }
+    }
+
     /// <summary>
     /// Returns the pathfinder for the currently loaded map, building it once
     /// per MapIndex instance (the CSR graph build is the expensive part).
@@ -4135,7 +4243,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void BeginAutowalkStandRecovery()
     {
-        if (_autowalkRecoveringPosition || _autowalkPath is null ||
+        // _autowalkRecoveringMovement guards against a race where GMCP briefly reports
+        // "sitting" while the automatic low-movement rest recovery (RecoverMovementAndContinueAsync)
+        // is already mid-flight — without it, OnAutowalkSitting's direct call here would force an
+        // early "stand", cutting the rest short and leaving both recovery flags set at once, which
+        // then races the recovery task's own later "stand".
+        if (_autowalkRecoveringMovement || _autowalkRecoveringPosition || _autowalkPath is null ||
             _autowalkStep >= _autowalkPath.Steps.Count)
         {
             return;
@@ -4662,12 +4775,15 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>One spell name per line, in the exact order they should be cast — auto-farm skips
     /// whichever buffs are already active and casts the rest the moment combat actually starts
     /// (see <see cref="TryAutoFarmCastSequence"/>/<see cref="AutoFarmCastSequencePolicy.GetSpellsNeedingCast"/>),
-    /// not on plain room entry. A leading "!" marks the entry offensive — aimed at whichever mob
-    /// the character is currently fighting instead of self, and always cast (no "already active"
-    /// check makes sense for a damage spell); without it, the entry is a self-cast buff. A
-    /// not-yet-memorized entry still blocks the farm's room-hop maintenance pass (mem + rest)
-    /// ahead of time, the same way <see cref="AutoFarmMemSpellsText"/>'s required entries do, so
-    /// nothing needs to mem mid-fight.</summary>
+    /// never on plain room entry — there's no enemy to target yet. A leading "!" marks the entry
+    /// offensive — aimed at whichever mob the character is currently fighting instead of self, and
+    /// always cast (no "already active" check makes sense for a damage spell), only ever at combat
+    /// start; without it, the entry is a self-cast buff, which — unlike an offensive entry — is
+    /// also kept topped up between fights by the farm's own room-hop maintenance pass (see
+    /// <see cref="ContinueAutoFarm"/>'s <c>missingBuffsToCast</c>) once it's worn off, not just at
+    /// the next fight's start. A not-yet-memorized entry blocks that same maintenance pass
+    /// (mem + rest) ahead of time, the same way <see cref="AutoFarmMemSpellsText"/>'s required
+    /// entries do, so nothing needs to mem mid-fight.</summary>
     public string AutoFarmCastSpellsText
     {
         get => string.Join('\n', _autoFarmCastSequence.Select(
@@ -4827,8 +4943,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void PushAutoFarmVisitedRoomIds() =>
         Map.AutoFarmVisitedRoomIds = new HashSet<int>(_autoFarmVisitedRoomIds);
 
-    /// <summary>Picks the farm's next move: HP/required-spell maintenance first (see
-    /// <see cref="MaintainAutoFarmAndContinueAsync"/>), otherwise the nearest unvisited,
+    /// <summary>Picks the farm's next move: HP/required-spell/cast-sequence-buff maintenance first
+    /// (see <see cref="MaintainAutoFarmAndContinueAsync"/> — this is also where a self-buff that
+    /// wore off between fights gets recast, keeping the cast sequence's buffs up continuously
+    /// rather than only at the start of the next fight), otherwise the nearest unvisited,
     /// non-excluded room in <see cref="_autoFarmRegions"/> via <see cref="FarmTraversalPlanner"/>,
     /// walked to with the same <see cref="StartAutowalk"/> machinery a named-location walk uses
     /// (arrival loops back here through <see cref="CompleteAutowalkArrival"/>).</summary>
@@ -4847,21 +4965,32 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             requiredMemSpellNames, _latestMemorizedSpells);
         var missingCastSpellsToMem = AutoFarmCastSequencePolicy.GetSpellsNeedingMemorization(
             _autoFarmCastSequence, _latestMemorizedSpells);
+        // Self-buffs from the cast sequence that are memorized but have worn off between fights —
+        // TryAutoFarmCastSequence only (re)casts these when combat starts, so without this a buff
+        // that expires mid-farm (e.g. during a long walk between mobs) would just stay down until
+        // the next fight instead of being kept up continuously. Offensive entries are excluded:
+        // there's no enemy to target while just walking between rooms.
+        var missingBuffsToCast = AutoFarmCastSequencePolicy.GetSpellsNeedingCast(
+                _autoFarmCastSequence, _activeAffectNames, _latestMemorizedSpells)
+            .Where(spell => !spell.Offensive)
+            .Select(spell => spell.Name)
+            .ToList();
 
-        if (needsHealRecovery || missingRequiredSpells.Count > 0 || missingCastSpellsToMem.Count > 0)
+        if (needsHealRecovery || missingRequiredSpells.Count > 0 || missingCastSpellsToMem.Count > 0 ||
+            missingBuffsToCast.Count > 0)
         {
             if (_autoFarmHealRecoveryAttempts >= MaxAutoFarmHealRecoveryAttempts)
             {
                 StopAutoFarm(needsHealRecovery
                     ? "Farma zatrzymana: HP wciąż poniżej progu po kilku próbach leczenia."
-                    : "Farma zatrzymana: nie udaje się uzupełnić wymaganych zaklęć po kilku próbach.");
+                    : "Farma zatrzymana: nie udaje się uzupełnić brakujących zaklęć/buffów po kilku próbach.");
                 return;
             }
 
             _autoFarmHealRecoveryAttempts++;
             AutoFarmStatusText = needsHealRecovery
                 ? "HP poniżej progu — leczę się."
-                : "Uzupełniam brakujące zaklęcia — odpoczywam.";
+                : "Uzupełniam zaklęcia/buffy — odpoczywam.";
 
             // Already stopping for a required reason — piggyback any missing opportunistic spell
             // onto the same mem/rest pass instead of waiting for a required reason to line up.
@@ -4872,7 +5001,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             _ = MaintainAutoFarmAndContinueAsync(
                 needsHealRecovery,
-                [.. missingRequiredSpells, .. missingOptionalSpells, .. missingCastSpellsToMem.Select(spell => spell.Name)]);
+                [.. missingRequiredSpells, .. missingOptionalSpells, .. missingCastSpellsToMem.Select(spell => spell.Name)],
+                missingBuffsToCast);
             return;
         }
 
@@ -4952,15 +5082,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Fires <see cref="_autoFarmCastSequence"/> the moment combat actually starts (see
-    /// the GMCP position "fighting" transition in <see cref="UpdateCharacterPosition"/>), not on
-    /// plain room entry — buffing up in an empty room the farm is just passing through achieves
-    /// nothing. Only casts what's already memorized (<see cref="AutoFarmCastSequencePolicy.GetSpellsNeedingCast"/>);
-    /// a not-yet-memorized entry is handled ahead of time by <see cref="ContinueAutoFarm"/>'s own
-    /// room-hop maintenance pass, well before any fight, so nothing needs to pause mid-combat to
-    /// mem. A buff entry always targets self; an offensive entry targets whichever mob GMCP
-    /// Room.People currently reports the character fighting (<see cref="RoomPerson.Enemy"/> on the
-    /// character's own entry) — an offensive entry is skipped entirely, not mis-cast at self, if
-    /// that isn't known yet (Room.People hasn't caught up with the fresh "fighting" transition).</summary>
+    /// the GMCP position "fighting" transition in <see cref="UpdateCharacterPosition"/>) — the only
+    /// point an offensive entry can fire at all, since it needs a real enemy to target. A buff
+    /// entry can also be (re)cast here, but is just as often already covered by then: see
+    /// <see cref="ContinueAutoFarm"/>'s own room-hop maintenance pass, which keeps buffs topped up
+    /// continuously between fights too, not only at the start of the next one. Only casts what's
+    /// already memorized (<see cref="AutoFarmCastSequencePolicy.GetSpellsNeedingCast"/>); a
+    /// not-yet-memorized entry is handled ahead of time by that same room-hop maintenance pass,
+    /// well before any fight, so nothing needs to pause mid-combat to mem. A buff entry always
+    /// targets self; an offensive entry targets whichever mob GMCP Room.People currently reports
+    /// the character fighting (<see cref="RoomPerson.Enemy"/> on the character's own entry) — an
+    /// offensive entry is skipped entirely, not mis-cast at self, if that isn't known yet
+    /// (Room.People hasn't caught up with the fresh "fighting" transition).</summary>
     private void TryAutoFarmCastSequence()
     {
         if (!_autoFarmActive)
@@ -5035,10 +5168,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Casts/memorizes the configured heal spell when <paramref name="needsHealRecovery"/>
     /// (see <see cref="HealthRecoveryPolicy.GetRecoveryAction"/>), memorizes every entry in
-    /// <paramref name="missingSpells"/>, then always rests for a beat — mirroring
-    /// <see cref="RecoverMovementAndContinueAsync"/>'s shape for autowalk's own low-movement
-    /// recovery, just covering two maintenance needs in one pass instead of one.</summary>
-    private async Task MaintainAutoFarmAndContinueAsync(bool needsHealRecovery, IReadOnlyList<string> missingSpells)
+    /// <paramref name="missingSpells"/>, (re)casts every entry in <paramref name="buffsToCast"/> —
+    /// self-buffs from the cast sequence that have worn off between fights, see
+    /// <see cref="ContinueAutoFarm"/>'s <c>missingBuffsToCast</c> — then always rests for a beat —
+    /// mirroring <see cref="RecoverMovementAndContinueAsync"/>'s shape for autowalk's own
+    /// low-movement recovery, just covering more maintenance needs in one pass instead of one.</summary>
+    private async Task MaintainAutoFarmAndContinueAsync(
+        bool needsHealRecovery, IReadOnlyList<string> missingSpells, IReadOnlyList<string> buffsToCast)
     {
         if (needsHealRecovery)
         {
@@ -5057,6 +5193,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         foreach (var spellName in missingSpells)
         {
             await SendTriggeredCommandAsync($"mem \"{spellName}\"");
+        }
+
+        foreach (var spellName in buffsToCast)
+        {
+            await SendTriggeredCommandAsync($"cast \"{spellName}\" self");
         }
 
         var restSeconds = _settings.AutowalkRestSeconds;
@@ -7133,6 +7274,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             PlayNotificationSound();
         }
+
+        var description = $"Trigger: „{rule.Name}”";
+        Dispatcher.UIThread.Post(() =>
+        {
+            AutomationFired?.Invoke(description);
+            ShowAutomationActivity(description);
+        });
     }
 
     /// <summary>Overridable in tests — avoids actually invoking the Windows system beep (and its
@@ -7627,6 +7775,47 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<FolderTreeNode> NoteTree { get; } = [];
     public ObservableCollection<FolderTreeNode> AutowalkTree { get; } = [];
 
+    // --- Live search boxes above each section's tree (see BuildAutomationSearchPredicate) ---
+    private string _timerFilterText = string.Empty;
+    private string _aliasFilterText = string.Empty;
+    private string _triggerFilterText = string.Empty;
+
+    public string TimerFilterText
+    {
+        get => _timerFilterText;
+        set
+        {
+            if (SetProperty(ref _timerFilterText, value))
+            {
+                RebuildFolderTrees();
+            }
+        }
+    }
+
+    public string AliasFilterText
+    {
+        get => _aliasFilterText;
+        set
+        {
+            if (SetProperty(ref _aliasFilterText, value))
+            {
+                RebuildFolderTrees();
+            }
+        }
+    }
+
+    public string TriggerFilterText
+    {
+        get => _triggerFilterText;
+        set
+        {
+            if (SetProperty(ref _triggerFilterText, value))
+            {
+                RebuildFolderTrees();
+            }
+        }
+    }
+
     /// <summary>When true, collection-change handlers skip rebuilds (bulk load).</summary>
     private bool _suppressTreeRebuild;
 
@@ -7644,19 +7833,51 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Rebuilds every section's folder tree from the flat collections.</summary>
     private void RebuildFolderTrees()
     {
-        RebuildTree(TimerTree, FolderKind.Timers, Timers);
-        RebuildTree(AliasTree, FolderKind.Aliases, AliasRules);
-        RebuildTree(TriggerTree, FolderKind.Triggers, TriggerRules);
+        RebuildTree(TimerTree, FolderKind.Timers, Timers, BuildAutomationSearchPredicate(_timerFilterText));
+        RebuildTree(AliasTree, FolderKind.Aliases, AliasRules, BuildAutomationSearchPredicate(_aliasFilterText));
+        RebuildTree(TriggerTree, FolderKind.Triggers, TriggerRules, BuildAutomationSearchPredicate(_triggerFilterText));
         RebuildTree(NoteTree, FolderKind.Notes, Notes);
         RebuildTree(AutowalkTree, FolderKind.Autowalk, Locations);
+    }
+
+    /// <summary>Case-insensitive "contains" match against a timer's name/commands or a rule's
+    /// name/pattern/action — null when <paramref name="filterText"/> is blank, so
+    /// <see cref="RebuildTree"/> skips filtering entirely rather than allocating a
+    /// matches-everything predicate.</summary>
+    private static Func<IFolderItem, bool>? BuildAutomationSearchPredicate(string filterText)
+    {
+        if (string.IsNullOrWhiteSpace(filterText))
+        {
+            return null;
+        }
+
+        var needle = filterText.Trim();
+        return item => item switch
+        {
+            TimerEntry timer =>
+                timer.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                timer.CommandsText.Contains(needle, StringComparison.OrdinalIgnoreCase),
+            AutomationRuleEntry rule =>
+                rule.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                rule.Pattern.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                rule.Action.Contains(needle, StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
     }
 
     /// <summary>
     /// Projects the folders of <paramref name="kind"/> and the given items into a
     /// tree of <see cref="FolderTreeNode"/>. Folders sort by name, items keep
     /// their collection order; loose items (no/unknown folder) render at the root.
+    /// When <paramref name="matchesFilter"/> is given, a leaf survives only if it matches, and a
+    /// folder survives only if at least one descendant does — the search box's live filter, with
+    /// no effect on Notes/Autowalk (neither passes one).
     /// </summary>
-    private void RebuildTree(ObservableCollection<FolderTreeNode> target, FolderKind kind, IEnumerable<IFolderItem> items)
+    private void RebuildTree(
+        ObservableCollection<FolderTreeNode> target,
+        FolderKind kind,
+        IEnumerable<IFolderItem> items,
+        Func<IFolderItem, bool>? matchesFilter = null)
     {
         target.Clear();
 
@@ -7694,6 +7915,19 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
+        if (matchesFilter is not null)
+        {
+            for (var i = roots.Count - 1; i >= 0; i--)
+            {
+                if (!FolderTreeNodeMatchesFilter(roots[i], matchesFilter))
+                {
+                    roots.RemoveAt(i);
+                }
+            }
+
+            looseItems = looseItems.Where(matchesFilter).ToList();
+        }
+
         // Recursive item counts and activation state for folder badges/chrome.
         foreach (var root in roots)
         {
@@ -7713,6 +7947,27 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         _ = folderIds; // reserved for future validation
+    }
+
+    /// <summary>Prunes <paramref name="node"/>'s subtree in place to only the branches leading to
+    /// a match, returning whether anything survived (a leaf matching directly, or a folder with at
+    /// least one surviving child).</summary>
+    private static bool FolderTreeNodeMatchesFilter(FolderTreeNode node, Func<IFolderItem, bool> matches)
+    {
+        if (!node.IsFolder)
+        {
+            return node.Content is IFolderItem item && matches(item);
+        }
+
+        for (var i = node.Children.Count - 1; i >= 0; i--)
+        {
+            if (!FolderTreeNodeMatchesFilter(node.Children[i], matches))
+            {
+                node.Children.RemoveAt(i);
+            }
+        }
+
+        return node.Children.Count > 0;
     }
 
     private static FolderMetrics ComputeFolderMetrics(FolderTreeNode node)
@@ -8300,6 +8555,26 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>Client-side "/reconnect" meta-command — disconnects (if connected) and reconnects
+    /// using the current profile's host/port, including auto-login. Same effect as manually
+    /// clicking Rozłącz then Połącz, but usable from timers/triggers/aliases (via
+    /// send("/reconnect")) and from the command bar, the same way "/recast" is.</summary>
+    private async Task ReconnectCurrentProfileAsync()
+    {
+        if (IsBusy)
+        {
+            EmitSystem("Nie można teraz wykonać /reconnect: klient jest zajęty.", 33);
+            return;
+        }
+
+        if (IsConnected)
+        {
+            await DisconnectAsync();
+        }
+
+        await ConnectAsync();
+    }
+
     private async Task SendCurrentCommandAsync()
     {
         var sourceCommand = CommandText.Trim();
@@ -8336,6 +8611,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (string.Equals(segment, "/recast", StringComparison.OrdinalIgnoreCase))
             {
                 await RecastMissingBuffsAsync();
+                continue;
+            }
+
+            if (string.Equals(segment, "/reconnect", StringComparison.OrdinalIgnoreCase))
+            {
+                await ReconnectCurrentProfileAsync();
                 continue;
             }
 
@@ -9397,6 +9678,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             QueueTriggeredCommands([orderedCommand]);
         }
 
+        if (RemoteControlEnabled
+            && RemoteCommandPolicy.TryGetCommand(line, RemoteControlCharacterName, out var remoteCommand))
+        {
+            QueueTriggeredCommands([remoteCommand]);
+        }
+
         if (AutoRecastOnLeaderSnapEnabled
             && LeaderSnapPolicy.IsLeaderSnap(line, _latestCharacterName, _latestGroupUpdate))
         {
@@ -9441,6 +9728,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _autoAssistNpcPending = true;
             TryAutoAssistNpcIfConfirmed();
             Dispatcher.UIThread.Post(TryAutoFarmCastSequence);
+            Dispatcher.UIThread.Post(() => CombatStateChanged?.Invoke(true));
         }
 
         if (nowLying && !wasLying)
@@ -9475,6 +9763,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (wasFighting && !nowFighting)
         {
             _autoAssistNpcPending = false;
+            Dispatcher.UIThread.Post(() => CombatStateChanged?.Invoke(false));
         }
 
         if (wasFighting && !nowFighting && !nowSitting)
@@ -9877,6 +10166,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (string.Equals(command, "/recast", StringComparison.OrdinalIgnoreCase))
         {
             await RecastMissingBuffsAsync();
+            return;
+        }
+
+        // "/reconnect" is the same kind of client-side meta-command as "/recast" above — see
+        // ReconnectCurrentProfileAsync. Automation (timers/triggers/aliases) reaches it here.
+        if (string.Equals(command, "/reconnect", StringComparison.OrdinalIgnoreCase))
+        {
+            await ReconnectCurrentProfileAsync();
             return;
         }
 
@@ -10967,5 +11264,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _triggerSendLock.Dispose();
         _triggerCts.Dispose();
         _autowalkCts.Dispose();
+        _automationActivityClearCts?.Dispose();
     }
 }

@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using MoonSharp.Interpreter;
 
@@ -31,6 +32,14 @@ public sealed record LuaGameState(
 /// </summary>
 public sealed class LuaScriptEngine
 {
+    /// <summary>Unlike e.g. Jint (LimitMemory/MaxStatements/TimeoutInterval/LimitRecursion),
+    /// MoonSharp 2.0.0 has no built-in execution limit, and .NET provides no safe way to forcibly
+    /// stop a running managed thread (Thread.Abort was removed after .NET Framework) — so a
+    /// runaway script (e.g. "while true do end", or one imported from someone else's shared
+    /// triggers/aliases) can only be given up on, not stopped. This bounds how long any one
+    /// <see cref="Run"/> call waits before doing that — see <see cref="ExecuteWithTimeout"/>.</summary>
+    private static readonly TimeSpan ExecutionTimeout = TimeSpan.FromSeconds(2);
+
     private Script _script = new();
     private readonly object _lock = new();
 
@@ -151,9 +160,51 @@ public sealed class LuaScriptEngine
 
             _script.Globals["skills_on_cooldown"] = skillsOnCooldown;
 
-            _script.DoString(source);
+            ExecuteWithTimeout(source);
 
             return commands;
         }
+    }
+
+    /// <summary>Runs <see cref="Script.DoString"/> on a dedicated background thread and waits up
+    /// to <see cref="ExecutionTimeout"/> for it. A script that never returns can't be forcibly
+    /// stopped, so instead of hanging every later <see cref="Run"/> call behind it forever, this
+    /// abandons the stuck thread (it keeps one core busy until the process exits — the best
+    /// available outcome without Thread.Abort) and swaps in a brand new <see cref="Script"/> for
+    /// everything from now on, the same reset <see cref="Reset"/> does for a profile switch, then
+    /// reports the timeout as an ordinary Lua runtime error so existing call sites (which already
+    /// catch <see cref="InterpreterException"/> for a syntax/runtime error) handle it unchanged.
+    /// Must only be called while already holding <see cref="_lock"/>.</summary>
+    /// <exception cref="InterpreterException">The script had a syntax error, threw at runtime, or
+    /// exceeded <see cref="ExecutionTimeout"/>.</exception>
+    private void ExecuteWithTimeout(string source)
+    {
+        ExceptionDispatchInfo? capturedException = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _script.DoString(source);
+            }
+            catch (Exception exception)
+            {
+                capturedException = ExceptionDispatchInfo.Capture(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "LuaScriptEngine.Run",
+        };
+        thread.Start();
+
+        if (!thread.Join(ExecutionTimeout))
+        {
+            _script = new Script();
+            RegisterEcho();
+            throw new ScriptRuntimeException(
+                $"Skrypt Lua przekroczył limit czasu wykonania ({ExecutionTimeout.TotalSeconds:0}s) i został przerwany.");
+        }
+
+        capturedException?.Throw();
     }
 }

@@ -18,6 +18,7 @@ public sealed class AutomationRuleEntry : ObservableObject, IActivatableFolderIt
     private string? _folderId;
     private bool _isEditing;
     private bool _playSoundOnMatch;
+    private bool _recentlyFired;
 
     public AutomationRuleEntry(
         string name, string type, string pattern, string action, bool isEnabled,
@@ -136,5 +137,15 @@ public sealed class AutomationRuleEntry : ObservableObject, IActivatableFolderIt
     {
         get => _isEditing;
         set => SetProperty(ref _isEditing, value);
+    }
+
+    /// <summary>UI-only (never persisted) — true for a few seconds right after this trigger's
+    /// pattern matches a line, driving the "recently fired" highlight on the timers/triggers
+    /// status bar (see <see cref="Views.Panels.TerminalPanelView"/>). Only ever set for triggers
+    /// — aliases fire on typed input, not received text, so there's nothing to flash for.</summary>
+    public bool RecentlyFired
+    {
+        get => _recentlyFired;
+        set => SetProperty(ref _recentlyFired, value);
     }
 }

@@ -224,9 +224,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private AutowalkLocation? _temporaryTarget;
 
     // --- Recent automation activity (bottom status bar) ---
-    private static readonly TimeSpan AutomationActivityDisplayDuration = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan AutomationActivityDisplayDuration = TimeSpan.FromSeconds(3);
     private string? _recentAutomationActivityText;
     private CancellationTokenSource? _automationActivityClearCts;
+    private readonly Dictionary<string, CancellationTokenSource> _triggerRecentlyFiredClearTokens = new();
 
     // Destination of a walk that was cut short (lost route / off-course), so a
     // bare /walk can pick the journey back up. Cleared on arrival, explicit stop,
@@ -1381,11 +1382,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Raised whenever a user-defined Trigger rule matches a line, or a Timer tick
     /// actually sends at least one command — carries a short human-readable description ("Trigger:
-    /// „Nazwa”" / "Timer: „Nazwa”") used both to light up the blue taskbar-overlay badge (main
-    /// window, if unfocused) and to show <see cref="RecentAutomationActivityText"/> in the bottom
-    /// status bar for a few seconds. Not raised for every internal command queued by other
-    /// automation (auto-assist orders, auto-recast, ...), only for a genuine Trigger/Timer firing,
-    /// matching what the player configured directly.</summary>
+    /// „Nazwa”" / "Timer: „Nazwa”") used to light up the blue taskbar-overlay badge (main window,
+    /// if unfocused). A Trigger match also flashes the matching entry itself on the timers/
+    /// triggers status bar (see <see cref="FlashTriggerRecentlyFired"/>) rather than repeating its
+    /// name here in text; a Timer firing still shows via <see cref="RecentAutomationActivityText"/>
+    /// since a timer has no per-firing highlight of its own. Not raised for every internal command
+    /// queued by other automation (auto-assist orders, auto-recast, ...), only for a genuine
+    /// Trigger/Timer firing, matching what the player configured directly.</summary>
     public event Action<string>? AutomationFired;
 
     /// <summary>Raised when a profile becomes active; the view auto-connects then.</summary>
@@ -2342,6 +2345,44 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
 
             _settings.ChatSoundOnNewMessageEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    /// <summary>Backs the "Pokaż na pasku" checkbox on the Timery tab — hides the active-timers
+    /// strip on the terminal's timer/skill-cooldown bar (see TerminalPanelView) without touching
+    /// any timer's own enabled state. On by default.</summary>
+    public bool ShowTimersOnStatusBarEnabled
+    {
+        get => _settings.ShowTimersOnStatusBarEnabled;
+        set
+        {
+            if (_settings.ShowTimersOnStatusBarEnabled == value)
+            {
+                return;
+            }
+
+            _settings.ShowTimersOnStatusBarEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    /// <summary>Backs the "Pokaż na pasku" checkbox on the Triggery tab — hides the
+    /// enabled-triggers strip on the same bar as <see cref="ShowTimersOnStatusBarEnabled"/>
+    /// without touching any trigger's own enabled state. On by default.</summary>
+    public bool ShowTriggersOnStatusBarEnabled
+    {
+        get => _settings.ShowTriggersOnStatusBarEnabled;
+        set
+        {
+            if (_settings.ShowTriggersOnStatusBarEnabled == value)
+            {
+                return;
+            }
+
+            _settings.ShowTriggersOnStatusBarEnabled = value;
             OnPropertyChanged();
             SaveSettings();
         }
@@ -3799,10 +3840,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _autowalkStatusText, value);
     }
 
-    /// <summary>Short-lived "Trigger: „Nazwa”" / "Timer: „Nazwa”" text for the bottom status bar
-    /// — set by <see cref="OnTriggerRuleMatched"/>/<see cref="SyncTimer"/> via
-    /// <see cref="ShowAutomationActivity"/>, cleared automatically a few seconds later. Null means
-    /// nothing recent to show, which the view uses to collapse the status bar entirely.</summary>
+    /// <summary>Short-lived "Timer: „Nazwa”" text on the timers/triggers status bar — set by
+    /// <see cref="SyncTimer"/> via <see cref="ShowAutomationActivity"/>, cleared automatically a
+    /// few seconds later. A Trigger match does not set this — it flashes its own entry on the same
+    /// bar instead (see <see cref="FlashTriggerRecentlyFired"/>), since unlike a timer it already
+    /// has a persistent, named row to highlight. Null means nothing recent to show.</summary>
     public string? RecentAutomationActivityText
     {
         get => _recentAutomationActivityText;
@@ -7279,8 +7321,52 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Dispatcher.UIThread.Post(() =>
         {
             AutomationFired?.Invoke(description);
-            ShowAutomationActivity(description);
+            FlashTriggerRecentlyFired(rule.Name);
         });
+    }
+
+    /// <summary>Lights up <see cref="AutomationRuleEntry.RecentlyFired"/> on the trigger matching
+    /// <paramref name="ruleName"/> for <see cref="AutomationActivityDisplayDuration"/> — the
+    /// gray-to-blue flash on the timers/triggers status bar. Matches by name since the Core
+    /// <see cref="TriggerRule"/> carries no back-reference to its originating
+    /// <see cref="AutomationRuleEntry"/>; a later match on the same trigger restarts the timer
+    /// instead of stacking, same as <see cref="ShowAutomationActivity"/>.</summary>
+    private void FlashTriggerRecentlyFired(string ruleName)
+    {
+        var entry = TriggerRules.FirstOrDefault(rule => string.Equals(rule.Name, ruleName, StringComparison.Ordinal));
+        if (entry is null)
+        {
+            return;
+        }
+
+        entry.RecentlyFired = true;
+
+        if (_triggerRecentlyFiredClearTokens.TryGetValue(entry.Id, out var existing))
+        {
+            existing.Cancel();
+            existing.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _triggerRecentlyFiredClearTokens[entry.Id] = cts;
+        _ = ClearTriggerRecentlyFiredAfterDelayAsync(entry, cts.Token);
+    }
+
+    private async Task ClearTriggerRecentlyFiredAfterDelayAsync(AutomationRuleEntry entry, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(AutomationActivityDisplayDuration, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            entry.RecentlyFired = false;
+        }
     }
 
     /// <summary>Overridable in tests — avoids actually invoking the Windows system beep (and its
@@ -8954,6 +9040,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             () => ShowExtendedEffects, v => ShowExtendedEffects = v),
         new("chatsound", "Dźwięk czatu", "Krótki dźwięk przy nowej wiadomości na czacie.",
             () => ChatSoundOnNewMessageEnabled, v => ChatSoundOnNewMessageEnabled = v),
+        new("timersbar", "Timery na pasku", "Pasek aktywnych timerów nad polem komend.",
+            () => ShowTimersOnStatusBarEnabled, v => ShowTimersOnStatusBarEnabled = v),
+        new("triggersbar", "Triggery na pasku", "Pasek aktywnych triggerów nad polem komend.",
+            () => ShowTriggersOnStatusBarEnabled, v => ShowTriggersOnStatusBarEnabled = v),
     ];
 
     /// <summary>Bare "/&lt;nazwa&gt;" flips the current value; "/&lt;nazwa&gt; on|off" (also
@@ -11265,5 +11355,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _triggerCts.Dispose();
         _autowalkCts.Dispose();
         _automationActivityClearCts?.Dispose();
+        foreach (var cts in _triggerRecentlyFiredClearTokens.Values)
+        {
+            cts.Dispose();
+        }
     }
 }

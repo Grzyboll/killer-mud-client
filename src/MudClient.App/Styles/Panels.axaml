@@ -74,6 +74,17 @@
     <Setter Property="FontSize" Value="11" />
   </Style>
 
+  <!-- Trigger name on the timers/skills status bar (TerminalPanelView) — dim gray at rest,
+       lights up blue for a few seconds right after the trigger's pattern matches a line (see
+       MainWindowViewModel.AutomationRuleEntry.RecentlyFired). -->
+  <Style Selector="TextBlock.mud-trigger-name">
+    <Setter Property="Foreground" Value="{StaticResource MudBrushParchmentDim}" />
+  </Style>
+  <Style Selector="TextBlock.mud-trigger-name.mud-recently-fired">
+    <Setter Property="Foreground" Value="{StaticResource MudBrushArcaneBlueBright}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
   <!-- Folder header row inside the reusable FolderTreeView -->
   <Style Selector="Border.mud-folder-row">
     <Setter Property="Background" Value="{StaticResource MudBrushHeaderGradient}" />

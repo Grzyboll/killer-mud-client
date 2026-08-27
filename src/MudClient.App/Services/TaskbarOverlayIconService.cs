@@ -28,6 +28,7 @@ public enum TaskbarNotificationColor
 public static class TaskbarOverlayIconService
 {
     private const int IconSize = 16;
+    private const double CircleFillRatio = 0.6;
 
     private static ITaskbarList3? _taskbarList;
     private static bool _initAttempted;
@@ -145,7 +146,9 @@ public static class TaskbarOverlayIconService
 
         var pixels = new byte[IconSize * IconSize * 4];
         var center = (IconSize - 1) / 2.0;
-        var radius = IconSize / 2.0 - 1.0;
+        // A smaller dot with real padding around it reads more like a typical taskbar overlay
+        // badge (Teams/Discord-style) — filling nearly the whole 16x16 canvas looked oversized.
+        var radius = IconSize / 2.0 * CircleFillRatio;
         for (var y = 0; y < IconSize; y++)
         {
             for (var x = 0; x < IconSize; x++)

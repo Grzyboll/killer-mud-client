@@ -188,6 +188,47 @@ public sealed class LuaScriptEngineTests
         Assert.Throws<ScriptRuntimeException>(() => engine.Run("error(\"boom\")", line: null, match: null));
     }
 
+    // ====================================================================
+    // Execution timeout — MoonSharp has no built-in limit (unlike Jint's LimitMemory/
+    // MaxStatements/TimeoutInterval), so a runaway script must be given up on instead.
+    // ====================================================================
+
+    [Fact]
+    public void Run_InfiniteLoop_ThrowsScriptRuntimeExceptionInsteadOfHangingForever()
+    {
+        var engine = new LuaScriptEngine();
+
+        Assert.Throws<ScriptRuntimeException>(
+            () => engine.Run("while true do end", line: null, match: null));
+    }
+
+    [Fact]
+    public void Run_AfterATimeout_EngineIsStillUsableWithAFreshEnvironment()
+    {
+        var engine = new LuaScriptEngine();
+        engine.Run("count = 5", line: null, match: null);
+
+        Assert.Throws<ScriptRuntimeException>(
+            () => engine.Run("while true do end", line: null, match: null));
+
+        // Matches Reset()'s own contract — a timeout swaps in a brand new Script, so the global
+        // set before the hang is gone, but the engine itself is otherwise usable right away.
+        var result = engine.Run("send(tostring(count))", line: null, match: null);
+        Assert.Equal(["nil"], result);
+    }
+
+    [Fact]
+    public void Run_ScriptThatFinishesWellWithinTheTimeout_ReturnsNormally()
+    {
+        // Regression guard: the timeout mechanism itself (background thread + Join) must not add
+        // meaningfully to a normal, fast script's latency or otherwise interfere with it.
+        var engine = new LuaScriptEngine();
+
+        var result = engine.Run("for i = 1, 1000 do end send(\"done\")", line: null, match: null);
+
+        Assert.Equal(["done"], result);
+    }
+
     [Fact]
     public void Run_FailedScript_DoesNotLeakPartialSendsFromThatCall()
     {

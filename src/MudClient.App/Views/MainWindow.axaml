@@ -201,23 +201,6 @@
               IsVisible="{Binding Toasts.Count}" />
     </StackPanel>
 
-    <!-- ========================================================================
-         Row 2: recent automation activity ("Trigger: ...", "Timer: ..."), shown
-         for a few seconds and auto-cleared — see MainWindowViewModel's
-         RecentAutomationActivityText / ShowAutomationActivity.
-         ======================================================================== -->
-    <Border Grid.Row="2"
-            Classes="mud-bar-bottom"
-            Padding="10,5"
-            IsVisible="{Binding RecentAutomationActivityText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-      <StackPanel Orientation="Horizontal" Spacing="6">
-        <TextBlock Text="⚡" />
-        <TextBlock Text="{Binding RecentAutomationActivityText}"
-                   Classes="mud-caption"
-                   TextTrimming="CharacterEllipsis" />
-      </StackPanel>
-    </Border>
-
     <controls:LargeTabbedWidget Grid.RowSpan="3"
                                 Title="Killeropedia"
                                 IsBookStyle="True"

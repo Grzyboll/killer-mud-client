@@ -250,7 +250,7 @@
           <Border Classes="mud-badge"><TextBlock Text="{Binding Timers.Count}" /></Border>
         </StackPanel>
       </TabItem.Header>
-      <Grid RowDefinitions="Auto,*">
+      <Grid RowDefinitions="Auto,Auto,*">
         <Border Classes="mud-bar-bottom">
           <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
             <Button Content="＋ Nowy timer" Command="{Binding StartAddTimerCommand}"
@@ -267,7 +267,12 @@
                     Tag="{x:Static models:FolderKind.Timers}" Click="Import_OnClick" />
           </Grid>
         </Border>
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+        <Border Grid.Row="1" Classes="mud-bar-bottom">
+          <CheckBox IsChecked="{Binding ShowTimersOnStatusBarEnabled}"
+                    Content="Pokaż na pasku nad polem komend"
+                    ToolTip.Tip="Pasek aktywnych timerów nad polem komend w terminalu. Włączone domyślnie." />
+        </Border>
+        <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="8" Margin="10,8,10,12">
 
       <Expander Classes="mud-expander"
@@ -371,7 +376,7 @@
           <Border Classes="mud-badge"><TextBlock Text="{Binding TriggerRules.Count}" /></Border>
         </StackPanel>
       </TabItem.Header>
-      <Grid RowDefinitions="Auto,*">
+      <Grid RowDefinitions="Auto,Auto,*">
         <Border Classes="mud-bar-bottom">
           <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
             <Button Content="＋ Nowy trigger" Command="{Binding StartAddTriggerCommand}"
@@ -388,7 +393,12 @@
                     Tag="{x:Static models:FolderKind.Triggers}" Click="Import_OnClick" />
           </Grid>
         </Border>
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+        <Border Grid.Row="1" Classes="mud-bar-bottom">
+          <CheckBox IsChecked="{Binding ShowTriggersOnStatusBarEnabled}"
+                    Content="Pokaż na pasku nad polem komend"
+                    ToolTip.Tip="Pasek aktywnych triggerów nad polem komend w terminalu. Włączone domyślnie." />
+        </Border>
+        <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="8" Margin="10,8,10,12">
             <Expander Classes="mud-expander"
                       Header="{Binding RuleFormHeader}"

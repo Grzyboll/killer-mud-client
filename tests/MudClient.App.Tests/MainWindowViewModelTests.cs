@@ -2743,6 +2743,42 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         Assert.True(_vm.ChatSoundOnNewMessageEnabled);
     }
 
+    // ====================================================================
+    // ShowTimersOnStatusBarEnabled / ShowTriggersOnStatusBarEnabled — the
+    // "Pokaż na pasku" checkboxes on the Timery/Triggery tabs (default on).
+    // ====================================================================
+
+    [Fact]
+    public void ShowTimersAndTriggersOnStatusBar_DefaultToEnabled()
+    {
+        Assert.True(_vm.ShowTimersOnStatusBarEnabled);
+        Assert.True(_vm.ShowTriggersOnStatusBarEnabled);
+    }
+
+    [Fact]
+    public void CommandToggles_IncludesTimersBar_AndTerminalCommandTogglesIt()
+    {
+        Assert.Contains(_vm.CommandToggles, t => t.Command == "timersbar");
+        Assert.True(_vm.ShowTimersOnStatusBarEnabled);
+
+        var consumed = InvokeTryHandleSettingsToggleCommand("/timersbar off");
+
+        Assert.True(consumed);
+        Assert.False(_vm.ShowTimersOnStatusBarEnabled);
+    }
+
+    [Fact]
+    public void CommandToggles_IncludesTriggersBar_AndTerminalCommandTogglesIt()
+    {
+        Assert.Contains(_vm.CommandToggles, t => t.Command == "triggersbar");
+        Assert.True(_vm.ShowTriggersOnStatusBarEnabled);
+
+        var consumed = InvokeTryHandleSettingsToggleCommand("/triggersbar off");
+
+        Assert.True(consumed);
+        Assert.False(_vm.ShowTriggersOnStatusBarEnabled);
+    }
+
     [Fact]
     public void TryHandleSettingsToggleCommand_BareCommand_TogglesCurrentValue()
     {

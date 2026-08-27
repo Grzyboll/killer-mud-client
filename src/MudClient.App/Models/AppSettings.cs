@@ -109,4 +109,13 @@ public sealed class AppSettings
     /// <see cref="MudClient.Core.Automation.ChatLinePolicy"/>). Off by default so upgrading
     /// doesn't suddenly start beeping.</summary>
     public bool ChatSoundOnNewMessageEnabled { get; set; }
+
+    /// <summary>Shows the active-timers strip on the terminal's timer/skill-cooldown bar (see
+    /// TerminalPanelView). On by default; turn off if the strip feels cluttered with many timers
+    /// running.</summary>
+    public bool ShowTimersOnStatusBarEnabled { get; set; } = true;
+
+    /// <summary>Shows the enabled-triggers strip (with its gray/blue recently-fired flash) on the
+    /// same bar as <see cref="ShowTimersOnStatusBarEnabled"/>. On by default.</summary>
+    public bool ShowTriggersOnStatusBarEnabled { get; set; } = true;
 }

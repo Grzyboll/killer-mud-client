@@ -68,6 +68,7 @@
       <Border Classes="mud-bar-bottom" Padding="8,3">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+            <StackPanel IsVisible="{Binding ShowTimersOnStatusBarEnabled}">
             <ItemsControl ItemsSource="{Binding Timers}" IsVisible="{Binding Timers.Count}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
@@ -109,6 +110,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </StackPanel>
 
             <!-- Skills currently on cooldown (Char.Skills.Timeout GMCP), shown as "* skillname"
                  for as long as the skill's timeout stays true. -->
@@ -127,6 +129,51 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Triggers, laid out the same way as timers above (pause/resume + name) — every
+                 trigger stays visible regardless of enabled state, same reasoning as timers. The
+                 name is dim gray at rest and flashes blue for a few seconds right after its
+                 pattern matches a line (see AutomationRuleEntry.RecentlyFired /
+                 MainWindowViewModel.FlashTriggerRecentlyFired). -->
+            <StackPanel IsVisible="{Binding ShowTriggersOnStatusBarEnabled}">
+            <ItemsControl ItemsSource="{Binding TriggerRules}" IsVisible="{Binding TriggerRules.Count}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:AutomationRuleEntry">
+                  <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,12,0"
+                              ToolTip.Tip="{Binding PatternAndActionSummary}">
+                    <Button Content="⏸" FontSize="9" Padding="3,1" MinWidth="0" MinHeight="0"
+                            Classes="mud-small"
+                            IsVisible="{Binding IsEnabled}"
+                            ToolTip.Tip="Wstrzymaj trigger"
+                            Command="{Binding $parent[UserControl].DataContext.ToggleRuleCommand}"
+                            CommandParameter="{Binding}" />
+                    <Button Content="▶" FontSize="9" Padding="3,1" MinWidth="0" MinHeight="0"
+                            Classes="mud-small"
+                            IsVisible="{Binding !IsEnabled}"
+                            ToolTip.Tip="Wznów trigger"
+                            Command="{Binding $parent[UserControl].DataContext.ToggleRuleCommand}"
+                            CommandParameter="{Binding}" />
+                    <TextBlock Text="{Binding Name}" FontSize="9" VerticalAlignment="Center"
+                               FontFamily="Consolas"
+                               Classes="mud-trigger-name"
+                               Classes.mud-recently-fired="{Binding RecentlyFired}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </StackPanel>
+
+            <!-- A Trigger match or Timer firing lights this up for a few seconds — see
+                 MainWindowViewModel.ShowAutomationActivity/RecentAutomationActivityText. -->
+            <TextBlock Text="{Binding RecentAutomationActivityText}"
+                       FontSize="9" VerticalAlignment="Center"
+                       IsVisible="{Binding RecentAutomationActivityText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                       Foreground="{StaticResource MudBrushArcaneBlueBright}" />
           </StackPanel>
 
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">

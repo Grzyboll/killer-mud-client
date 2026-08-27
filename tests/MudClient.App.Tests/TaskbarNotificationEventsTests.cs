@@ -77,7 +77,11 @@ public sealed class TaskbarNotificationEventsTests
 
             var description = Assert.Single(fired);
             Assert.Contains("boss", description, StringComparison.Ordinal);
-            Assert.Equal(description, viewModel.RecentAutomationActivityText);
+
+            // A Trigger match flashes its own entry on the timers/triggers status bar (see
+            // TriggerRecentlyFiredTests) instead of repeating its name here in text — unlike a
+            // Timer firing, which has no per-firing highlight of its own and still uses this.
+            Assert.Null(viewModel.RecentAutomationActivityText);
         }
         finally
         {
@@ -113,21 +117,24 @@ public sealed class TaskbarNotificationEventsTests
     [AvaloniaFact]
     public async Task RecentAutomationActivityText_ClearsAfterDisplayDuration()
     {
+        // ShowAutomationActivity is what a Timer firing calls (see SyncTimer) — invoked directly
+        // here so this test only exercises the clear-timer itself, not a real periodic Timer that
+        // would keep re-firing and refreshing the text throughout the 3.5s wait below.
         var (viewModel, directory) = CreateViewModel();
 
         try
         {
-            viewModel.AutomationRules.Add(new AutomationRuleEntry(
-                "boss", "trigger", "Zabijasz golema", "attack", isEnabled: true));
-            InvokeApplyAutomation(viewModel);
-
-            InvokeOnLineReceived(viewModel, "Zabijasz golema.");
+            var method = typeof(MainWindowViewModel).GetMethod(
+                "ShowAutomationActivity", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+            method!.Invoke(viewModel, ["Timer: „Obserwacja”"]);
             Dispatcher.UIThread.RunJobs();
+
             Assert.NotNull(viewModel.RecentAutomationActivityText);
 
-            // AutomationActivityDisplayDuration is 4 seconds — wait past it and pump the
+            // AutomationActivityDisplayDuration is 3 seconds — wait past it and pump the
             // dispatcher so the queued clear continuation actually runs.
-            await Task.Delay(TimeSpan.FromSeconds(4.5));
+            await Task.Delay(TimeSpan.FromSeconds(3.5));
             Dispatcher.UIThread.RunJobs();
 
             Assert.Null(viewModel.RecentAutomationActivityText);

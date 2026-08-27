@@ -103,6 +103,13 @@ public sealed class AppSettings
     /// text show through. One setting for all of them, not one per panel.</summary>
     public double TerminalOverlayOpacity { get; set; } = DefaultTerminalOverlayOpacity;
 
+    /// <summary>Name of the layout (see <see cref="Services.LayoutPresetService.DefaultName"/>/
+    /// <see cref="Services.LayoutPresetService.TransparencyName"/>/
+    /// <see cref="Services.LayoutPresetService.CompactName"/>/a custom preset's own name) to switch
+    /// to right after startup. Null (or explicitly "TRANSPARENCY") both leave the app on its
+    /// normal TRANSPARENCY bootstrap layout, since that is already the implicit default.</summary>
+    public string? DefaultStartupLayoutName { get; set; }
+
     /// <summary>Plays a short Windows notification sound (see
     /// <see cref="Services.NotificationSoundPlayer"/>) for every line the Chat panel mirrors
     /// (say/sayto/tell/clantell/grouptell/yell/shout — see

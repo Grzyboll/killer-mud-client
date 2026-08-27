@@ -105,7 +105,7 @@
                 <ItemsControl ItemsSource="{Binding AvailableLayouts}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="models:LayoutMenuItem">
-                      <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,1">
                         <Button Grid.Column="0"
                                 Content="{Binding Name}"
                                 HorizontalAlignment="Stretch"
@@ -114,6 +114,22 @@
                                 Command="{Binding $parent[Window].DataContext.ApplyLayoutCommand}"
                                 CommandParameter="{Binding Name}" />
                         <Button Grid.Column="1"
+                                Classes="mud-small"
+                                Content="★"
+                                Margin="4,0,0,0"
+                                IsVisible="{Binding IsDefaultStartup}"
+                                ToolTip.Tip="Domyślny przy starcie programu — kliknij, aby odznaczyć"
+                                Command="{Binding $parent[Window].DataContext.SetDefaultStartupLayoutCommand}"
+                                CommandParameter="{Binding Name}" />
+                        <Button Grid.Column="1"
+                                Classes="mud-small"
+                                Content="☆"
+                                Margin="4,0,0,0"
+                                IsVisible="{Binding !IsDefaultStartup}"
+                                ToolTip.Tip="Ustaw jako domyślny przy starcie programu"
+                                Command="{Binding $parent[Window].DataContext.SetDefaultStartupLayoutCommand}"
+                                CommandParameter="{Binding Name}" />
+                        <Button Grid.Column="2"
                                 Classes="mud-danger mud-small"
                                 Content="✕"
                                 Margin="4,0,0,0"

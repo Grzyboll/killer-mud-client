@@ -563,6 +563,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (savedLayout is { IsTransparencyLayout: true })
         {
             _dockFactory.TryApplySnapshot(Layout, savedLayout);
+            ApplySnapshotOverlaySettings(savedLayout);
         }
 
         _dockFactory.HiddenTools.CollectionChanged += OnHiddenToolsChanged;
@@ -586,6 +587,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ApplyLayoutCommand = new RelayCommand<string>(ApplyLayout);
         SaveLayoutCommand = new RelayCommand(SaveLayout);
         DeleteLayoutCommand = new RelayCommand<string>(DeleteLayout);
+        SetDefaultStartupLayoutCommand = new RelayCommand<string>(SetDefaultStartupLayout);
+
+        // The constructor already bootstrapped TRANSPARENCY above (with any remembered dock-layout
+        // .json session restored into it) — only re-switch here if the user picked a DIFFERENT
+        // layout as their startup default. Null or "TRANSPARENCY" both mean "keep the bootstrap
+        // as-is", so this never redundantly rebuilds it.
+        if (!string.IsNullOrWhiteSpace(_settings.DefaultStartupLayoutName)
+            && !string.Equals(_settings.DefaultStartupLayoutName, LayoutPresetService.TransparencyName, StringComparison.Ordinal))
+        {
+            ApplyLayout(_settings.DefaultStartupLayoutName);
+        }
+
         OpenKilleropediaCommand = new RelayCommand(() =>
         {
             IsHelpOpen = false;
@@ -708,6 +721,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public IRelayCommand<string> DeleteLayoutCommand { get; }
 
+    public IRelayCommand<string> SetDefaultStartupLayoutCommand { get; }
+
     public IRelayCommand OpenKilleropediaCommand { get; }
 
     public IRelayCommand OpenHelpCommand { get; }
@@ -809,14 +824,43 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void RefreshAvailableLayouts()
     {
+        bool IsDefault(string name) => string.Equals(_settings.DefaultStartupLayoutName, name, StringComparison.Ordinal);
+
         AvailableLayouts.Clear();
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.DefaultName, CanDelete = false });
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.TransparencyName, CanDelete = false });
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.CompactName, CanDelete = false });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.DefaultName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.DefaultName),
+        });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.TransparencyName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.TransparencyName),
+        });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.CompactName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.CompactName),
+        });
         foreach (var preset in _layoutPresets)
         {
-            AvailableLayouts.Add(new LayoutMenuItem { Name = preset.Name, CanDelete = true });
+            AvailableLayouts.Add(new LayoutMenuItem { Name = preset.Name, CanDelete = true, IsDefaultStartup = IsDefault(preset.Name) });
         }
+    }
+
+    /// <summary>Backs the star button next to each entry in the "Układy paneli" flyout — toggles
+    /// whether that layout is switched to right after startup (see
+    /// <see cref="AppSettings.DefaultStartupLayoutName"/>). Clicking the current default's star
+    /// clears it, falling back to the normal TRANSPARENCY bootstrap.</summary>
+    private void SetDefaultStartupLayout(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        _settings.DefaultStartupLayoutName = string.Equals(_settings.DefaultStartupLayoutName, name, StringComparison.Ordinal)
+            ? null
+            : name;
+        SaveSettings();
+        RefreshAvailableLayouts();
     }
 
     /// <summary>Restores the built-in default layout, the built-in transparency layout, or a
@@ -874,6 +918,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 {
                     // Snapshot no longer matches the current set of panels (e.g. after an update).
                     AddToast($"Układ „{name}” jest nieaktualny — wczytano DEFAULT.", "warning");
+                }
+                else
+                {
+                    ApplySnapshotOverlaySettings(preset.Snapshot);
+                    SaveSettings();
                 }
             }
         }
@@ -1005,17 +1054,85 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        foreach (var entry in _settings.TerminalOverlays.ToList())
+        // Each PinToolAsOverlay below raises OverlayChanged synchronously, whose handler
+        // (OnOverlayChanged) rebuilds _settings.TerminalOverlays from whatever's pinned SO FAR
+        // (see SyncTerminalOverlaysFromFactory) — restoring 2+ remembered overlays one at a time
+        // with that handler still wired would overwrite not-yet-pinned entries' saved
+        // column/width with freshly-defaulted ones the moment the NEXT overlay gets pinned.
+        // Unhooking it for the loop and syncing once at the end avoids that self-clobbering.
+        _dockFactory.OverlayChanged -= OnOverlayChanged;
+        try
         {
-            var tool = _dockFactory.AllTools.FirstOrDefault(t => t.Id == entry.PanelId);
-            if (tool is null || string.Equals(tool.Id, "Terminal", StringComparison.Ordinal))
+            foreach (var entry in _settings.TerminalOverlays.ToList())
             {
-                continue;
-            }
+                var tool = _dockFactory.AllTools.FirstOrDefault(t => t.Id == entry.PanelId);
+                if (tool is null || string.Equals(tool.Id, "Terminal", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            _dockFactory.PinToolAsOverlay(tool);
+                _dockFactory.PinToolAsOverlay(tool);
+            }
+        }
+        finally
+        {
+            _dockFactory.OverlayChanged += OnOverlayChanged;
+        }
+
+        SyncTerminalOverlaysFromFactory();
+    }
+
+    /// <summary>Snapshots the dock tree plus (in TRANSPARENCY mode) a copy of the live overlay
+    /// arrangement <see cref="ApplyOverlayFromSettings"/> reads from — see
+    /// <see cref="DockLayoutSnapshot.TerminalOverlays"/> for why the copy is needed. Shared by the
+    /// session auto-save-on-close and by <see cref="SaveLayout"/> so a saved layout reproduces the
+    /// overlay arrangement it had when saved, not whatever the live settings currently hold.</summary>
+    private DockLayoutSnapshot SnapshotLayoutWithOverlays()
+    {
+        var snapshot = _dockFactory.Snapshot(Layout);
+        if (_dockFactory.IsTransparencyLayout)
+        {
+            snapshot.TerminalOverlays = CopyTerminalOverlays(_settings.TerminalOverlays);
+            snapshot.TerminalOverlayOpacity = _settings.TerminalOverlayOpacity;
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>Copies a snapshot's own overlay arrangement (if it carries one) onto the live
+    /// settings <see cref="ApplyOverlayFromSettings"/> reads from, so restoring a saved
+    /// TRANSPARENCY layout reproduces the columns/order/sizes it had when saved instead of
+    /// whatever the live settings currently hold. A no-op for a snapshot saved before this was
+    /// tracked (empty list) or one that was never in TRANSPARENCY mode. Deliberately does not
+    /// call <see cref="SaveSettings"/> itself — the constructor's startup-restore call site must
+    /// not write settings.json before <see cref="ActivateProfile"/> has had a chance to read it
+    /// for <see cref="LoadLegacyAutomationSettingsSeed"/>'s one-time migration (a profile created
+    /// after that write would otherwise see the just-rewritten AppSettings shape instead of the
+    /// original file, silently losing any legacy field AppSettings itself never had); callers
+    /// that need it persisted (e.g. an explicit "Wczytaj układ" click) save explicitly instead.</summary>
+    private void ApplySnapshotOverlaySettings(DockLayoutSnapshot snapshot)
+    {
+        if (!snapshot.IsTransparencyLayout || snapshot.TerminalOverlays.Count == 0)
+        {
+            return;
+        }
+
+        _settings.TerminalOverlays = CopyTerminalOverlays(snapshot.TerminalOverlays);
+        if (snapshot.TerminalOverlayOpacity is { } opacity)
+        {
+            _settings.TerminalOverlayOpacity = opacity;
         }
     }
+
+    private static List<TerminalOverlayEntry> CopyTerminalOverlays(IEnumerable<TerminalOverlayEntry> entries) =>
+        entries.Select(entry => new TerminalOverlayEntry
+        {
+            PanelId = entry.PanelId,
+            HeightWeight = entry.HeightWeight,
+            ColumnIndex = entry.ColumnIndex,
+            ColumnWidth = entry.ColumnWidth,
+            ColumnHeightFraction = entry.ColumnHeightFraction,
+        }).ToList();
 
     private void SaveLayout()
     {
@@ -1033,7 +1150,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var snapshot = _dockFactory.Snapshot(Layout);
+        var snapshot = SnapshotLayoutWithOverlays();
         var existing = _layoutPresets.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.Ordinal));
         if (existing is not null)
         {
@@ -11188,7 +11305,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            _dockLayoutService.Save(_dockFactory.Snapshot(Layout));
+            _dockLayoutService.Save(SnapshotLayoutWithOverlays());
         }
         catch (IOException)
         {

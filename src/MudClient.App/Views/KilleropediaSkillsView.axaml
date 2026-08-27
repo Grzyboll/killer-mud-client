@@ -81,7 +81,9 @@
                     <ItemsControl ItemsSource="{Binding NewTattoos}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="models:TattooBonusEntry">
-                          <Border Padding="4,3" ToolTip.Tip="{Binding Description}" ToolTip.ShowDelay="0">
+                          <Border Padding="4,3"
+                                  ToolTip.Tip="{Binding Converter={x:Static conv:TattooTooltipConverter.Instance}}"
+                                  ToolTip.ShowDelay="0">
                             <StackPanel Spacing="1">
                               <TextBlock Text="{Binding Name}" Foreground="#F0E6CE" />
                               <TextBlock Text="{Binding Description}" Foreground="#B8AE98" FontSize="11"

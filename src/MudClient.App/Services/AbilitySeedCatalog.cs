@@ -302,7 +302,10 @@ public static class AbilitySeedCatalog
 
             S("circle", 15, ["A"]),
 
-            S("dagger mastery", 18, ["P"]),
+            // Real capture shows "dagger mastery" gated at level 20 here, not 18 as originally
+            // hand-typed — corrected against ability-help.json (captured via Wojownik's own
+            // "/mapuj" run, which also lists Złodziej among its available classes).
+            S("dagger mastery", 20, ["P"]),
 
             S("short-sword mastery", 20, ["P"]),
 
@@ -344,6 +347,9 @@ public static class AbilitySeedCatalog
             // "light armor" really is listed twice in the source — once inside "umiejętności
             // zbroi" above, once as its own standalone [P] bullet. Kept as given.
             S("light armor", 1, ["P"]),
+            // Added after cross-checking ability-help.json: the real "claw-weapons" capture
+            // (originally miscredited to Barbarzyńca — see BuildBarbarzyncaSkills) lists Druid(1).
+            S("claw-weapons", 1, ["P"]),
 
             S("mining", 4, ["A"]),
 
@@ -461,14 +467,15 @@ public static class AbilitySeedCatalog
             S("disarm", 18, ["A"]),
 
             S("pick lock", 20, ["A"]),
-            S("weapon mastery", 20, ["P"]),
 
-            S("whirlwind", 25, ["A"]),
+            // "weapon mastery", "whirlwind" and "whirlwind mastery" were removed from here after
+            // cross-checking against real "/mapuj" captures (ability-help.json): the game's own
+            // "Dostepne dla klas" for all three lists only Wojownik/Barbarzynca/Wedrowiec, never
+            // Nomad — this hand-typed seed had them assigned to the wrong class.
             S("bladefury", 25, ["A"]),
 
             S("parry mastery", 31, ["A"]),
             S("avatar mastery", 31, ["A"]),
-            S("whirlwind mastery", 31, ["A"]),
             S("hustle mastery", 31, ["A"]),
         ];
     }
@@ -687,7 +694,9 @@ public static class AbilitySeedCatalog
             S("bandage", 1, ["A"]),
             S("herbs knowledge", 1, ["A"]),
             S("trapper", 1, ["A"]),
-            S("claw-weapons", 1, ["P"]),
+            // "claw-weapons" was removed from here (real "/mapuj" capture shows Druid/Wedrowiec
+            // only, never Barbarzyńca — see BuildDruidSkills) after cross-checking against
+            // ability-help.json.
 
             S("rescue", 4, ["A"]),
             S("mighty blow", 4, ["A", "T"]),
@@ -709,11 +718,16 @@ public static class AbilitySeedCatalog
             S("dualwield style", 16, ["P", "T"]),
 
             S("critical strike", 20, ["A", "T"]),
-            S("whirlwind", 20, ["A"]),
+            // Real capture shows "whirlwind" gated at level 25 here, not 20 as originally
+            // hand-typed — corrected against ability-help.json.
+            S("whirlwind", 25, ["A"]),
 
             S("berserk mastery", 31, ["A"]),
             S("damage reduction mastery", 31, ["A"]),
             S("recuperate mastery", 31, ["A"]),
+            // Added after cross-checking ability-help.json: the real "whirlwind mastery" capture
+            // (originally miscredited to Nomad — see BuildNomadSkills) lists Barbarzyńca(31).
+            S("whirlwind mastery", 31, ["A"]),
         ];
     }
 

@@ -815,6 +815,23 @@ public sealed class KilleropediaTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void NewTattoos_ClassNameFromRawGameTextLacksDiacritics_StillMatchesTheHandTypedCatalog()
+    {
+        // AbilityClasses (and so ToggleAbilityClassCommand's argument) comes from the game's own
+        // raw "help" text, which drops Polish diacritics entirely — so a real browsed class here
+        // is "Barbarzynca", not "Barbarzyńca" as tattoos.json (hand-typed with proper spelling)
+        // gates its Barbarzyńca-only bonuses. A plain string comparison would silently match
+        // nothing for this (or any other diacritic-bearing class, e.g. "Zlodziej"/"Złodziej").
+        var viewModel = CreateViewModelWithAbilities(
+            MakeAbility("berserk", "Barbarzynca", "Barbarzynca", ("Barbarzynca", 10), ("Wedrowiec", 10)));
+
+        viewModel.ToggleAbilityClassCommand.Execute("Barbarzynca");
+
+        Assert.True(viewModel.HasNewTattoos);
+        Assert.Contains(viewModel.NewTattoos, tattoo => tattoo.Name == "szaleniec");
+    }
+
+    [AvaloniaFact]
     public void NewTattoos_UniversalTattoo_NeverAppears()
     {
         // A "Wszystkie" tattoo already applies to every class, so it isn't something picking a

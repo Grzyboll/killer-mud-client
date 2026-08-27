@@ -606,15 +606,34 @@ public sealed class KilleropediaViewModel : ObservableObject
     /// <summary>Tattoo class bonuses gated to any of the currently browsed class(es)/specialization(s)
     /// — the tattoo-catalog analogue of <see cref="NewAbilities"/>, shown in the same "Sprawdź co
     /// zyskasz" flyout. A tattoo's <c>Classes</c> list holds real game class names (or "Wszystkie"/
-    /// a "Wymaga tricka: ..." pseudo-class for a universal or trick-gated one) — neither of those
-    /// ever matches a real browsed class name, so a universal tattoo naturally never shows up here:
-    /// it isn't something picking a specialization grants, since every class already has it.
+    /// "Wędrowiec"/a "Wymaga tricka: ..." pseudo-class for a universal, wanderer-tier, or
+    /// trick-gated one) — none of those ever matches a real browsed class name, so a tattoo every
+    /// class (or every Wędrowiec regardless of specialization) already has naturally never shows up
+    /// here: it isn't something picking a specialization grants. "Wędrowiec" specifically is
+    /// excluded rather than left to fall out of the comparison, because it's also
+    /// <c>_selectedAbilityClassNames</c>' own default/no-selection sentinel (see
+    /// <see cref="ToggleAbilityClassCommand"/>) — without the exclusion, normalizing diacritics
+    /// below would make that ASCII sentinel match tattoos.json's proper-spelling "Wędrowiec" and
+    /// wrongly show "grabieżca" before any specialization is even chosen.
     /// Recomputed and re-notified alongside <see cref="NewAbilities"/> in
-    /// <see cref="ApplyAbilityFilter"/>.</summary>
-    public IReadOnlyList<TattooBonusEntry> NewTattoos =>
-        _tattooCatalog.Bonuses
-            .Where(bonus => bonus.Classes.Any(className => _selectedAbilityClassNames.Contains(className)))
-            .ToList();
+    /// <see cref="ApplyAbilityFilter"/>. Compared with <see cref="SearchText.Normalize"/> rather
+    /// than a plain string match — <c>_selectedAbilityClassNames</c> comes from the game's own raw
+    /// "help" text, which drops Polish diacritics entirely (e.g. "Barbarzynca", "Zlodziej"), while
+    /// tattoos.json is hand-typed with proper spelling ("Barbarzyńca", "Złodziej"); a plain
+    /// comparison silently matched nothing for any class with a diacritic in its name.</summary>
+    public IReadOnlyList<TattooBonusEntry> NewTattoos
+    {
+        get
+        {
+            var selected = _selectedAbilityClassNames
+                .Select(SearchText.Normalize)
+                .Where(name => name != "wedrowiec")
+                .ToHashSet(StringComparer.Ordinal);
+            return _tattooCatalog.Bonuses
+                .Where(bonus => bonus.Classes.Any(className => selected.Contains(SearchText.Normalize(className))))
+                .ToList();
+        }
+    }
 
     public bool HasNewTattoos => NewTattoos.Count > 0;
 

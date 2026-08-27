@@ -730,6 +730,48 @@ public sealed class AbilitySkillTreeCanvas : Control
         };
     }
 
+    /// <summary>Same bordered-and-backgrounded tooltip look as <see cref="BuildTooltip"/> (opaque
+    /// dark card, not the platform's default tooltip chrome — see that method's own reasoning),
+    /// built for a tattoo bonus instead of an ability. Used by the "Sprawdź co zyskasz" tattoo
+    /// list in KilleropediaSkillsView, via <c>TattooTooltipConverter</c>, so a tattoo row's hover
+    /// tooltip is exactly as legible as an ability row's.</summary>
+    internal static Control BuildTattooTooltip(TattooBonusEntry tattoo)
+    {
+        var root = new StackPanel { Spacing = 6 };
+        root.Children.Add(new TextBlock
+        {
+            Text = tattoo.Name,
+            FontWeight = FontWeight.Bold,
+            FontSize = 16,
+            LineHeight = 19,
+            Foreground = new SolidColorBrush(OwnedNodeFillColor),
+        });
+
+        AddLabeledLine(root, "Klasy", tattoo.ClassesText);
+
+        root.Children.Add(new TextBlock
+        {
+            Text = tattoo.Description,
+            FontSize = 13,
+            LineHeight = 17,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            MaxHeight = 5000,
+            Foreground = new SolidColorBrush(TooltipTextColor),
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x1B, 0x14, 0x0B)),
+            BorderBrush = new SolidColorBrush(OwnedNodeFillColor),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(14),
+            MaxWidth = 440,
+            Child = root,
+        };
+    }
+
     private static void AddLabeledLine(StackPanel root, string label, string value)
     {
         var line = new StackPanel { Spacing = 3, Margin = new Thickness(0, 2, 0, 0) };

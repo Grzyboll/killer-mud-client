@@ -138,6 +138,133 @@ public sealed class KilleropediaTests : IDisposable
         Assert.Equal("Władca mroku", trickTeacher.Name);
     }
 
+    // ====================================================================
+    // FilteredTeacherSkillRows / FilteredTeacherTrickRows — the flat
+    // "Umiejętności"/"Triki" sub-tabs (one row per teacher+offering, not
+    // grouped by teacher first).
+    // ====================================================================
+
+    [Fact]
+    public void FlatTeacherRows_DefaultSearch_CountsMatchEveryTeacherSSkillsAndTricks()
+    {
+        var viewModel = CreateViewModel();
+
+        var allTeachers = TeacherCatalogLoader.Load();
+        Assert.Equal(allTeachers.Sum(teacher => teacher.Skills.Count), viewModel.FilteredTeacherSkillRows.Count);
+        Assert.Equal(allTeachers.Sum(teacher => teacher.Tricks.Count), viewModel.FilteredTeacherTrickRows.Count);
+    }
+
+    [Fact]
+    public void FlatTeacherSkillRows_SearchBySkillName_OnlyReturnsMatchingTeachersAndRows()
+    {
+        var viewModel = CreateViewModel();
+
+        // "bladesplash" is taught by several teachers (see TeacherCatalogLoader) — every returned
+        // row must be that skill, and mob 1960 (also matched by the vnum+name search above) must
+        // be among them.
+        viewModel.TeacherSearchText = "bladesplash";
+
+        Assert.NotEmpty(viewModel.FilteredTeacherSkillRows);
+        Assert.All(viewModel.FilteredTeacherSkillRows, row => Assert.Equal("bladesplash", row.Skill.Name));
+        Assert.Contains(viewModel.FilteredTeacherSkillRows, row => row.Teacher.MobVnum == "1960");
+    }
+
+    [Fact]
+    public void FlatTeacherTrickRows_SearchByTrickName_ReturnsOnlyThatTeacherAndTrick()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.TeacherSearchText = "thousandslayer";
+
+        var row = Assert.Single(viewModel.FilteredTeacherTrickRows);
+        Assert.Equal("33013", row.Teacher.MobVnum);
+        Assert.Equal("thousandslayer", row.Trick.Name);
+
+        // A trick-name search must not drag in the same teacher's unrelated skills — the whole
+        // point of the flat view is "only the teacher and the trick they offer", not everything
+        // else that teacher happens to teach.
+        Assert.Empty(viewModel.FilteredTeacherSkillRows);
+    }
+
+    // ====================================================================
+    // SkillKnowledge-driven coloring ("jak na mapie") and the "Tylko możliwe
+    // do nauczenia" filter — see TeacherKnowledgeConvertersTests for the
+    // converters themselves.
+    // ====================================================================
+
+    [Fact]
+    public void SkillKnowledge_ClassifiesTheSameSkillDifferentlyPerTeachersRange()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.TeacherSearchText = "bladesplash";
+
+        // Mob 1960 caps at 45%, mob 10785 caps at 65% — a single knowledge value of 50 must
+        // classify as Known against the first and Learnable against the second.
+        viewModel.SkillKnowledge = new Dictionary<string, int> { ["bladesplash"] = 50 };
+
+        var mob1960 = Assert.Single(viewModel.FilteredTeacherSkillRows, row => row.Teacher.MobVnum == "1960");
+        Assert.Equal(SkillKnowledgeState.Known, mob1960.State);
+        var mob10785 = Assert.Single(viewModel.FilteredTeacherSkillRows, row => row.Teacher.MobVnum == "10785");
+        Assert.Equal(SkillKnowledgeState.Learnable, mob10785.State);
+    }
+
+    [Fact]
+    public void SkillKnowledge_SkillNeverReported_ClassifiesAsNotLearnable()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.TeacherSearchText = "bladesplash";
+
+        // Knowledge data exists this session, but "bladesplash" itself never showed up in it —
+        // inferred to be outside this character's class skill list.
+        viewModel.SkillKnowledge = new Dictionary<string, int> { ["kick"] = 50 };
+
+        Assert.All(viewModel.FilteredTeacherSkillRows, row => Assert.Equal(SkillKnowledgeState.NotLearnable, row.State));
+    }
+
+    [Fact]
+    public void ShowOnlyLearnableTeacherOfferings_HidesKnownAndNotLearnable_KeepsUnknown()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.TeacherSearchText = "bladesplash";
+        // No SkillKnowledge set yet — every row starts Unknown.
+        Assert.Equal(4, viewModel.FilteredTeacherSkillRows.Count);
+
+        viewModel.ShowOnlyLearnableTeacherOfferings = true;
+        Assert.Equal(4, viewModel.FilteredTeacherSkillRows.Count); // Unknown rows are never hidden.
+
+        viewModel.SkillKnowledge = new Dictionary<string, int> { ["bladesplash"] = 50 };
+
+        // Known (mob 1960, cap 45) is hidden; the rest (Learnable at their higher caps) remain.
+        Assert.DoesNotContain(viewModel.FilteredTeacherSkillRows, row => row.Teacher.MobVnum == "1960");
+        Assert.All(viewModel.FilteredTeacherSkillRows, row => Assert.Equal(SkillKnowledgeState.Learnable, row.State));
+
+        viewModel.ShowOnlyLearnableTeacherOfferings = false;
+        Assert.Equal(4, viewModel.FilteredTeacherSkillRows.Count);
+    }
+
+    [Fact]
+    public void SelectedTeacherOfferings_ReflectClassification_AndRefreshWhenTeacherChanges()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SkillKnowledge = new Dictionary<string, int> { ["bladesplash"] = 50 };
+
+        viewModel.TeacherSearchText = "1960 chytry";
+        var mob1960 = Assert.Single(viewModel.FilteredTeachers);
+        viewModel.SelectedTeacher = mob1960;
+
+        var offering = Assert.Single(
+            viewModel.SelectedTeacherSkillOfferings, offering => offering.Skill.Name == "bladesplash");
+        Assert.Equal(SkillKnowledgeState.Known, offering.State);
+
+        viewModel.TeacherSearchText = "10785 nohi";
+        var mob10785 = Assert.Single(viewModel.FilteredTeachers);
+        viewModel.SelectedTeacher = mob10785;
+
+        var otherOffering = Assert.Single(
+            viewModel.SelectedTeacherSkillOfferings, offering => offering.Skill.Name == "bladesplash");
+        Assert.Equal(SkillKnowledgeState.Learnable, otherOffering.State);
+    }
+
     [Fact]
     public void QuestCatalog_ContainsPlayerQuestsWithoutVnums()
     {

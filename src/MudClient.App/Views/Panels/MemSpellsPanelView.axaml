@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:MudClient.App.ViewModels"
              xmlns:models="using:MudClient.App.Models"
+             xmlns:conv="using:MudClient.App.Converters"
              x:Class="MudClient.App.Views.Panels.MemSpellsPanelView"
              x:DataType="vm:MainWindowViewModel">
   <ScrollViewer>
@@ -98,13 +99,22 @@
                         IsVisible="{Binding IsActive}"
                         Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
                         CommandParameter="{Binding}">
-                  <Grid ColumnDefinitions="Auto,*,Auto">
+                  <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
                     <TextBlock Text="[+]"
                                Foreground="{StaticResource MudBrushEmeraldBright}"
                                Margin="0,0,6,0" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="1" Text="{Binding Name}"
                                VerticalAlignment="Center" />
-                    <Button Grid.Column="2" Content="✕" Classes="mud-small"
+                    <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
+                               IsVisible="{Binding HasCircle}"
+                               Classes="mud-faint" Margin="0,0,6,0"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="mem"
+                               FontSize="10"
+                               Margin="0,0,6,0" VerticalAlignment="Center"
+                               ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
+                               Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
+                    <Button Grid.Column="4" Content="✕" Classes="mud-small"
                             Padding="6,1"
                             ToolTip.Tip="Usuń z zestawu"
                             Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"
@@ -123,17 +133,26 @@
                         IsVisible="{Binding !IsActive}"
                         Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
                         CommandParameter="{Binding}">
-                  <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
                     <TextBlock Text="[!]"
                                Foreground="{StaticResource MudBrushCrimsonBright}"
                                Margin="0,0,6,0" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="1" Text="{Binding Name}"
                                Foreground="{StaticResource MudBrushCrimsonBright}"
                                VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Text="brak"
+                    <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
+                               IsVisible="{Binding HasCircle}"
                                Classes="mud-faint" Margin="0,0,6,0"
                                VerticalAlignment="Center" />
-                    <Button Grid.Column="3" Content="✕" Classes="mud-small"
+                    <TextBlock Grid.Column="3" Text="mem"
+                               FontSize="10"
+                               Margin="0,0,6,0" VerticalAlignment="Center"
+                               ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
+                               Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
+                    <TextBlock Grid.Column="4" Text="brak"
+                               Classes="mud-faint" Margin="0,0,6,0"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="5" Content="✕" Classes="mud-small"
                             Padding="6,1"
                             ToolTip.Tip="Usuń z zestawu"
                             Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"

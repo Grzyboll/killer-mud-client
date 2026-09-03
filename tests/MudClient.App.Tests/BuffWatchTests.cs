@@ -1,9 +1,14 @@
+using System.Reflection;
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using MudClient.App.Models;
 using MudClient.App.Services;
 using MudClient.App.ViewModels;
+using MudClient.Core.Gmcp;
 
 namespace MudClient.App.Tests;
 
+[Collection(AvaloniaUiCollection.Name)]
 public sealed class BuffWatchTests : IDisposable
 {
     private readonly string _directory =
@@ -155,5 +160,89 @@ public sealed class BuffWatchTests : IDisposable
 
         Assert.Equal(2, viewModel.BuffSets.Count);
         Assert.Contains(viewModel.Toasts, toast => toast.Text == "Zestaw „walka” już istnieje.");
+    }
+
+    // ====================================================================
+    // Mem/circle indicator (see BuffWatchEntry.IsMemorized/Circle) — sourced from Char.MemSpell,
+    // which reports every known spell slot (memorized or not), not just currently-memorized ones.
+    // ====================================================================
+
+    private static void RaiseMemSpellsChanged(MainWindowViewModel viewModel, params MemorizedSpell[] spells) =>
+        typeof(MainWindowViewModel)
+            .GetMethod("OnMemSpellsChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(viewModel, [spells]);
+
+    [AvaloniaFact]
+    public async Task OnMemSpellsChanged_SpellIsMemorized_MarksTheBuffMemorizedWithItsCircle()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "armor";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseMemSpellsChanged(viewModel, new MemorizedSpell(1, 2, "armor", Memed: true, Meming: false));
+        Dispatcher.UIThread.RunJobs();
+
+        var buff = Assert.Single(viewModel.RequiredBuffs);
+        Assert.True(buff.IsMemorized);
+        Assert.Equal(2, buff.Circle);
+        Assert.Equal("Krąg 2", buff.CircleDisplay);
+    }
+
+    [AvaloniaFact]
+    public async Task OnMemSpellsChanged_SpellKnownButNotMemorized_ShowsItsCircleWithoutMemorizedFlag()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "sanctuary";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseMemSpellsChanged(viewModel, new MemorizedSpell(1, 4, "sanctuary", Memed: false, Meming: false));
+        Dispatcher.UIThread.RunJobs();
+
+        var buff = Assert.Single(viewModel.RequiredBuffs);
+        Assert.False(buff.IsMemorized);
+        Assert.Equal(4, buff.Circle);
+    }
+
+    [AvaloniaFact]
+    public async Task OnMemSpellsChanged_SpellStillBeingMemorized_DoesNotCountAsMemorizedYet()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "bless";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseMemSpellsChanged(viewModel, new MemorizedSpell(1, 1, "bless", Memed: false, Meming: true));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(Assert.Single(viewModel.RequiredBuffs).IsMemorized);
+    }
+
+    [AvaloniaFact]
+    public async Task OnMemSpellsChanged_UnknownSpell_LeavesCircleUnset()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "some unseen spell";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseMemSpellsChanged(viewModel, new MemorizedSpell(1, 1, "armor", Memed: true, Meming: false));
+        Dispatcher.UIThread.RunJobs();
+
+        var buff = Assert.Single(viewModel.RequiredBuffs);
+        Assert.False(buff.IsMemorized);
+        Assert.Null(buff.Circle);
+        Assert.False(buff.HasCircle);
+        Assert.Equal(string.Empty, buff.CircleDisplay);
+    }
+
+    [AvaloniaFact]
+    public async Task OnMemSpellsChanged_NameWithParenthesizedCounter_StillMatchesByNormalizedName()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "mirror image (7)";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseMemSpellsChanged(viewModel, new MemorizedSpell(1, 3, "mirror image", Memed: true, Meming: false));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(Assert.Single(viewModel.RequiredBuffs).IsMemorized);
     }
 }

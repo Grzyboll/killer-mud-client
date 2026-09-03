@@ -3,11 +3,14 @@
              xmlns:vm="using:MudClient.App.ViewModels"
              xmlns:models="using:MudClient.App.Models"
              xmlns:b="using:MudClient.App.Behaviors"
+             xmlns:conv="using:MudClient.App.Converters"
              x:Class="MudClient.App.Views.KilleropediaTeachersView"
              x:DataType="vm:KilleropediaViewModel"
              Classes="killeropedia-page"
              x:Name="Root">
-  <Grid RowDefinitions="Auto,*" RowSpacing="10">
+  <TabControl Classes="mud-subtabs">
+    <TabItem Header="Wg nauczyciela">
+      <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="0,8,0,0">
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="12">
       <TextBox Grid.Column="0"
                Text="{Binding TeacherSearchText, UpdateSourceTrigger=PropertyChanged}"
@@ -96,17 +99,17 @@
                     <TextBlock Grid.Column="2" Classes="mud-faint" Text="Cena" />
                     <TextBlock Grid.Column="3" Classes="mud-faint" Text="Wymaga" />
                   </Grid>
-                  <ItemsControl ItemsSource="{Binding Skills}">
+                  <ItemsControl ItemsSource="{Binding #Root.((vm:KilleropediaViewModel)DataContext).SelectedTeacherSkillOfferings}">
                     <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="models:TeacherSkillEntry">
+                      <DataTemplate x:DataType="models:TeacherSkillOffering">
                         <Border Classes="mud-inset" Padding="8,6" Margin="0,1">
                           <Grid ColumnDefinitions="2*,80,70,80" ColumnSpacing="8">
                             <TextBlock Grid.Column="0"
-                                       b:SearchHighlight.Text="{Binding Name}"
-                                       b:SearchHighlight.Terms="{Binding #Root.((vm:KilleropediaViewModel)DataContext).TeacherSearchText}" />
-                            <TextBlock Grid.Column="1" Text="{Binding RangeText}" />
-                            <TextBlock Grid.Column="2" Text="{Binding PriceText}" />
-                            <TextBlock Grid.Column="3" Text="{Binding RequirementText}" />
+                                       Text="{Binding Skill.Name}"
+                                       TextDecorations="{Binding State, Converter={x:Static conv:SkillKnowledgeStateStrikethroughConverter.Instance}}" />
+                            <TextBlock Grid.Column="1" Text="{Binding Skill.RangeText}" />
+                            <TextBlock Grid.Column="2" Text="{Binding Skill.PriceText}" />
+                            <TextBlock Grid.Column="3" Text="{Binding Skill.RequirementText}" />
                           </Grid>
                         </Border>
                       </DataTemplate>
@@ -122,20 +125,18 @@
                     <TextBlock Grid.Column="1" Classes="mud-faint" Text="Szansa nauki" />
                     <TextBlock Grid.Column="2" Classes="mud-faint" Text="Cena" />
                   </Grid>
-                  <ItemsControl ItemsSource="{Binding Tricks}">
+                  <ItemsControl ItemsSource="{Binding #Root.((vm:KilleropediaViewModel)DataContext).SelectedTeacherTrickOfferings}">
                     <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="models:TeacherTrickEntry">
+                      <DataTemplate x:DataType="models:TeacherTrickOffering">
                         <Border Classes="mud-inset" Padding="8,6" Margin="0,1">
                           <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,120,100" ColumnSpacing="8">
-                              <TextBlock Grid.Column="0"
-                                         b:SearchHighlight.Text="{Binding Name}"
-                                         b:SearchHighlight.Terms="{Binding #Root.((vm:KilleropediaViewModel)DataContext).TeacherSearchText}" />
-                              <TextBlock Grid.Column="1" Text="{Binding LearnChanceText}" />
-                              <TextBlock Grid.Column="2" Text="{Binding PriceText}" />
+                              <TextBlock Grid.Column="0" Text="{Binding Trick.Name}" />
+                              <TextBlock Grid.Column="1" Text="{Binding Trick.LearnChanceText}" />
+                              <TextBlock Grid.Column="2" Text="{Binding Trick.PriceText}" />
                             </Grid>
                             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
-                                       b:SearchHighlight.Text="{Binding DescriptionText}"
+                                       b:SearchHighlight.Text="{Binding Trick.DescriptionText}"
                                        b:SearchHighlight.Terms="{Binding #Root.((vm:KilleropediaViewModel)DataContext).TeacherSearchText}" />
                           </StackPanel>
                         </Border>
@@ -149,5 +150,115 @@
         </ScrollViewer>
       </Border>
     </Grid>
-  </Grid>
+      </Grid>
+    </TabItem>
+
+    <TabItem Header="Umiejętności">
+      <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="0,8,0,0">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+          <TextBox Grid.Column="0"
+                   Text="{Binding TeacherSearchText, UpdateSourceTrigger=PropertyChanged}"
+                   PlaceholderText="Szukaj po nauczycielu, umiejętności, klasie, krainie lub vnum..." />
+          <ToggleButton Grid.Column="1"
+                        Classes="mud-small"
+                        Content="Tylko możliwe do nauczenia"
+                        IsChecked="{Binding ShowOnlyLearnableTeacherOfferings}"
+                        ToolTip.Tip="Ukryj umiejętności już opanowane lub niedostępne dla klasy postaci — niedostępne dla klasy są przekreślone" />
+          <TextBlock Grid.Column="2"
+                     Classes="mud-faint"
+                     Text="{Binding FilteredTeacherSkillRowCountText}"
+                     VerticalAlignment="Center" />
+        </Grid>
+
+        <Border Grid.Row="1" Classes="mud-inset" Padding="12">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="2*,1.5*,80,70,80" ColumnSpacing="8" Margin="8,0,8,4">
+              <TextBlock Grid.Column="0" Classes="mud-faint" Text="Nauczyciel" />
+              <TextBlock Grid.Column="1" Classes="mud-faint" Text="Umiejętność" />
+              <TextBlock Grid.Column="2" Classes="mud-faint" Text="Zakres" />
+              <TextBlock Grid.Column="3" Classes="mud-faint" Text="Cena" />
+              <TextBlock Grid.Column="4" Classes="mud-faint" Text="Wymaga" />
+            </Grid>
+            <ListBox ItemsSource="{Binding FilteredTeacherSkillRows}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="models:TeacherSkillRow">
+                  <Grid ColumnDefinitions="2*,1.5*,80,70,80" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0" Spacing="1">
+                      <TextBlock b:SearchHighlight.Text="{Binding Teacher.Name}"
+                                 b:SearchHighlight.Terms="{Binding #Root.((vm:KilleropediaViewModel)DataContext).TeacherSearchText}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="mud-faint"
+                                 Text="{Binding Teacher.LocationText}"
+                                 FontSize="11"
+                                 TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Skill.Name}"
+                               TextDecorations="{Binding State, Converter={x:Static conv:SkillKnowledgeStateStrikethroughConverter.Instance}}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding Skill.RangeText}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding Skill.PriceText}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="4" Text="{Binding Skill.RequirementText}" VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </TabItem>
+
+    <TabItem Header="Triki">
+      <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="0,8,0,0">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+          <TextBox Grid.Column="0"
+                   Text="{Binding TeacherSearchText, UpdateSourceTrigger=PropertyChanged}"
+                   PlaceholderText="Szukaj po nauczycielu, triku, klasie, krainie lub vnum..." />
+          <ToggleButton Grid.Column="1"
+                        Classes="mud-small"
+                        Content="Tylko możliwe do nauczenia"
+                        IsChecked="{Binding ShowOnlyLearnableTeacherOfferings}"
+                        ToolTip.Tip="Ukryj triki, których wymagania nie są jeszcze spełnione" />
+          <TextBlock Grid.Column="2"
+                     Classes="mud-faint"
+                     Text="{Binding FilteredTeacherTrickRowCountText}"
+                     VerticalAlignment="Center" />
+        </Grid>
+
+        <Border Grid.Row="1" Classes="mud-inset" Padding="12">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="2*,1.5*,120,100" ColumnSpacing="8" Margin="8,0,8,4">
+              <TextBlock Grid.Column="0" Classes="mud-faint" Text="Nauczyciel" />
+              <TextBlock Grid.Column="1" Classes="mud-faint" Text="Trik" />
+              <TextBlock Grid.Column="2" Classes="mud-faint" Text="Szansa nauki" />
+              <TextBlock Grid.Column="3" Classes="mud-faint" Text="Cena" />
+            </Grid>
+            <ListBox ItemsSource="{Binding FilteredTeacherTrickRows}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="models:TeacherTrickRow">
+                  <Grid ColumnDefinitions="2*,1.5*,120,100" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0" Spacing="1">
+                      <TextBlock b:SearchHighlight.Text="{Binding Teacher.Name}"
+                                 b:SearchHighlight.Terms="{Binding #Root.((vm:KilleropediaViewModel)DataContext).TeacherSearchText}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="mud-faint"
+                                 Text="{Binding Teacher.LocationText}"
+                                 FontSize="11"
+                                 TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Trick.Name}"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding Trick.DescriptionText}" />
+                    <TextBlock Grid.Column="2" Text="{Binding Trick.LearnChanceText}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding Trick.PriceText}" VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </TabItem>
+  </TabControl>
 </UserControl>

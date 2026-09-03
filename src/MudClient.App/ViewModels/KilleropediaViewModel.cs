@@ -38,6 +38,10 @@ public sealed class KilleropediaViewModel : ObservableObject
     private readonly HashSet<string> _selectedAbilityClassNames = new(StringComparer.OrdinalIgnoreCase) { "Wedrowiec" };
     private AbilitySkillTreeEntry? _selectedAbility;
     private DateTimeOffset? _abilitiesCapturedAtUtc;
+    private static readonly IReadOnlyDictionary<string, int> EmptySkillKnowledge =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, int> _skillKnowledge = EmptySkillKnowledge;
+    private bool _showOnlyLearnableTeacherOfferings;
     private string _teacherSearchText = string.Empty;
     private string _questSearchText = string.Empty;
     private QuestEntry? _selectedQuest;
@@ -143,6 +147,15 @@ public sealed class KilleropediaViewModel : ObservableObject
     }
 
     public ObservableCollection<TeacherEntry> FilteredTeachers { get; } = [];
+
+    /// <summary>Flat "Umiejętności" sub-tab — one row per (teacher, skill) pair across the whole
+    /// catalog, instead of the master-detail view's "pick a teacher first" grouping. Filtered by
+    /// the same <see cref="TeacherSearchText"/>, matched per row rather than per teacher — a
+    /// search for a skill name only surfaces the teachers who actually teach it.</summary>
+    public ObservableCollection<TeacherSkillRow> FilteredTeacherSkillRows { get; } = [];
+
+    /// <summary>Flat "Triki" sub-tab counterpart to <see cref="FilteredTeacherSkillRows"/>.</summary>
+    public ObservableCollection<TeacherTrickRow> FilteredTeacherTrickRows { get; } = [];
 
     public ObservableCollection<QuestEntry> FilteredQuests { get; } = [];
 
@@ -297,13 +310,97 @@ public sealed class KilleropediaViewModel : ObservableObject
         }
     }
 
+    /// <summary>This character's skill name → current level map, from the "skill" command — the
+    /// same source <see cref="MudClient.App.ViewModels.MapViewModel.SkillKnowledge"/> uses to color
+    /// its own teacher tooltips. Set by MainWindowViewModel alongside that assignment, so the
+    /// Nauczyciele view's skill/trick coloring (via
+    /// <see cref="MudClient.App.Controls.WorldMapControl.CreateSkillRun"/>-style classification in
+    /// the Converters) always matches the map. Defaults to empty (nothing collected yet this
+    /// session) rather than null, so bindings never need a null check.</summary>
+    public IReadOnlyDictionary<string, int> SkillKnowledge
+    {
+        get => _skillKnowledge;
+        set
+        {
+            if (SetProperty(ref _skillKnowledge, value ?? EmptySkillKnowledge))
+            {
+                // Every row's baked-in SkillKnowledgeState/IsLearnable (see TeacherSkillRow etc.)
+                // needs recomputing — not just row membership, which only actually changes while
+                // the "still learnable" filter is active.
+                ApplyTeacherFilter();
+                ApplySelectedTeacherOfferings();
+            }
+        }
+    }
+
+    /// <summary>Backs the "Pokaż tylko to, czego mogę się jeszcze nauczyć" toggle on the
+    /// Nauczyciele view's flat Umiejętności/Triki sub-tabs — hides rows already
+    /// <see cref="Services.SkillKnowledgeState.Known"/> or <see cref="Services.SkillKnowledgeState.NotLearnable"/>
+    /// (tricks: hides ones <see cref="Services.TrickKnowledgeClassifier.MeetsRequirements"/> reports
+    /// as unmet). Rows with no verdict yet (<see cref="Services.SkillKnowledgeState.Unknown"/> — no
+    /// "skill" data collected this session) are kept rather than hidden, so the filter never
+    /// silently empties the list before the player has run "skill" even once.</summary>
+    public bool ShowOnlyLearnableTeacherOfferings
+    {
+        get => _showOnlyLearnableTeacherOfferings;
+        set
+        {
+            if (SetProperty(ref _showOnlyLearnableTeacherOfferings, value))
+            {
+                ApplyTeacherFilter();
+            }
+        }
+    }
+
     public TeacherEntry? SelectedTeacher
     {
         get => _selectedTeacher;
-        set => SetProperty(ref _selectedTeacher, value);
+        set
+        {
+            if (SetProperty(ref _selectedTeacher, value))
+            {
+                ApplySelectedTeacherOfferings();
+            }
+        }
+    }
+
+    /// <summary>Skill/trick coloring for the "Wg nauczyciela" tab's per-teacher detail pane —
+    /// <see cref="TeacherEntry.Skills"/>/<see cref="TeacherEntry.Tricks"/> paired with their
+    /// current <see cref="SkillKnowledgeState"/>/learnability (see <see cref="TeacherSkillRow"/>'s
+    /// doc comment for why this is baked in rather than bound live). Rebuilt whenever
+    /// <see cref="SelectedTeacher"/> or <see cref="SkillKnowledge"/> changes.</summary>
+    public ObservableCollection<TeacherSkillOffering> SelectedTeacherSkillOfferings { get; } = [];
+
+    /// <summary>Trick counterpart to <see cref="SelectedTeacherSkillOfferings"/>.</summary>
+    public ObservableCollection<TeacherTrickOffering> SelectedTeacherTrickOfferings { get; } = [];
+
+    private void ApplySelectedTeacherOfferings()
+    {
+        SelectedTeacherSkillOfferings.Clear();
+        SelectedTeacherTrickOfferings.Clear();
+        if (SelectedTeacher is not { } teacher)
+        {
+            return;
+        }
+
+        foreach (var skill in teacher.Skills)
+        {
+            SelectedTeacherSkillOfferings.Add(new TeacherSkillOffering(
+                skill, SkillKnowledgeClassifier.Classify(skill.Name, skill.Max, SkillKnowledge)));
+        }
+
+        foreach (var trick in teacher.Tricks)
+        {
+            SelectedTeacherTrickOfferings.Add(new TeacherTrickOffering(
+                trick, TrickKnowledgeClassifier.MeetsRequirements(trick, SkillKnowledge)));
+        }
     }
 
     public string FilteredTeacherCountText => $"Nauczyciele: {FilteredTeachers.Count} z {_allTeachers.Count}";
+
+    public string FilteredTeacherSkillRowCountText => $"Wpisy: {FilteredTeacherSkillRows.Count} z {_allTeachers.Sum(teacher => teacher.Skills.Count)}";
+
+    public string FilteredTeacherTrickRowCountText => $"Wpisy: {FilteredTeacherTrickRows.Count} z {_allTeachers.Sum(teacher => teacher.Tricks.Count)}";
 
     public IRelayCommand<TeacherEntry> ShowTeacherOnMapCommand { get; }
 
@@ -815,8 +912,13 @@ public sealed class KilleropediaViewModel : ObservableObject
         var previousId = SelectedTeacher?.MobVnum;
 
         FilteredTeachers.Clear();
+        FilteredTeacherSkillRows.Clear();
+        FilteredTeacherTrickRows.Clear();
         foreach (var teacher in _allTeachers)
         {
+            var teacherHaystack = Normalize(string.Join(' ',
+                teacher.MobVnum, teacher.Name, teacher.Region, teacher.Area, teacher.RoomVnum, teacher.ClassesText));
+
             var haystack = Normalize(string.Join(' ',
                 teacher.MobVnum,
                 teacher.Name,
@@ -830,12 +932,48 @@ public sealed class KilleropediaViewModel : ObservableObject
             {
                 FilteredTeachers.Add(teacher);
             }
+
+            foreach (var skill in teacher.Skills)
+            {
+                var state = SkillKnowledgeClassifier.Classify(skill.Name, skill.Max, SkillKnowledge);
+                var skillHaystack = $"{teacherHaystack} {Normalize(skill.Name)}";
+                if (tokens.All(skillHaystack.Contains) && !IsHiddenByLearnableFilter(state))
+                {
+                    FilteredTeacherSkillRows.Add(new TeacherSkillRow(teacher, skill, state));
+                }
+            }
+
+            foreach (var trick in teacher.Tricks)
+            {
+                var isLearnable = TrickKnowledgeClassifier.MeetsRequirements(trick, SkillKnowledge);
+                var trickHaystack = Normalize(string.Join(' ', teacherHaystack, trick.Name, trick.EnhancesText));
+                if (tokens.All(trickHaystack.Contains) && !IsHiddenByLearnableFilter(isLearnable))
+                {
+                    FilteredTeacherTrickRows.Add(new TeacherTrickRow(teacher, trick, isLearnable));
+                }
+            }
         }
 
         SelectedTeacher = FilteredTeachers.FirstOrDefault(teacher => teacher.MobVnum == previousId)
             ?? FilteredTeachers.FirstOrDefault();
         OnPropertyChanged(nameof(FilteredTeacherCountText));
+        OnPropertyChanged(nameof(FilteredTeacherSkillRowCountText));
+        OnPropertyChanged(nameof(FilteredTeacherTrickRowCountText));
     }
+
+    /// <summary>True when <see cref="ShowOnlyLearnableTeacherOfferings"/> is on and this skill's
+    /// already-classified state means it's definitively not worth training here right now
+    /// (already known, or outside the character's class). An
+    /// <see cref="SkillKnowledgeState.Unknown"/> verdict (no "skill" data collected yet) is never
+    /// hidden — see that property's own doc comment for why.</summary>
+    private bool IsHiddenByLearnableFilter(SkillKnowledgeState state) =>
+        ShowOnlyLearnableTeacherOfferings && state is SkillKnowledgeState.Known or SkillKnowledgeState.NotLearnable;
+
+    /// <summary>Trick counterpart to <see cref="IsHiddenByLearnableFilter(SkillKnowledgeState)"/> —
+    /// hidden only once we have actual skill data confirming the requirements aren't met yet,
+    /// never just because none was collected this session.</summary>
+    private bool IsHiddenByLearnableFilter(bool isLearnable) =>
+        ShowOnlyLearnableTeacherOfferings && SkillKnowledge.Count > 0 && !isLearnable;
 
     private void ApplyQuestFilter()
     {

@@ -349,6 +349,33 @@
                 </Border>
 
                 <Border Classes="mud-section" Padding="14">
+                  <Grid ColumnDefinitions="150,*" ColumnSpacing="18">
+                    <TextBlock Grid.Column="0" Text="/repair" FontWeight="Bold"
+                               Foreground="{StaticResource MudBrushGoldBright}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap"
+                               Text="Zdejmuje cały ekwipunek (remove all), naprawia po kolei każdy zdjęty przedmiot (repair &lt;nazwa&gt;), a na koniec zakłada wszystko z powrotem (wear all). Wymaga wcześniejszego zaznaczenia „/repair” w zakładce Auto: Ekwipunek — inaczej zgłasza błąd i nic nie robi, żeby przypadkowe wpisanie nie rozebrało postaci. Działa też z paska komend oraz z timerów, triggerów i aliasów przez send(&quot;/repair&quot;)." />
+                  </Grid>
+                </Border>
+
+                <Border Classes="mud-section" Padding="14">
+                  <Grid ColumnDefinitions="150,*" ColumnSpacing="18">
+                    <TextBlock Grid.Column="0" Text="/autoget" FontWeight="Bold"
+                               Foreground="{StaticResource MudBrushGoldBright}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap"
+                               Text="Wysyła zdefiniowaną w zakładce Auto: Ekwipunek listę komend, po jednej w wierszu, po kolei (np. „get all.klej cia”, „exa cia”, „put all.klej {klej}”). „{klej}”/„{gem}” są zamieniane na skonfigurowane tam kontenery przed wysłaniem — te same, których używa „/jubiler” do wyjęcia łupu z powrotem. Każda linia „exa”/„examine” czeka na odpowiedź MUD-a i sprawdza ją pod kątem losowej księgi z Killeropedii (np. „duża księga triumfu”) — jeśli taka się znajdzie, wysyła po niej „get &lt;księga&gt; &lt;cel&gt;”. Uruchamia się też automatycznie po komunikacie „Zdobyłeś &lt;liczba&gt; punktów doświadczenia.” (czyli po każdym zabiciu). Wymaga wcześniejszego zaznaczenia „/autoget” w tej samej zakładce. Działa też z paska komend oraz z timerów, triggerów i aliasów przez send(&quot;/autoget&quot;)." />
+                  </Grid>
+                </Border>
+
+                <Border Classes="mud-section" Padding="14">
+                  <Grid ColumnDefinitions="150,*" ColumnSpacing="18">
+                    <TextBlock Grid.Column="0" Text="/jubiler" FontWeight="Bold"
+                               Foreground="{StaticResource MudBrushGoldBright}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap"
+                               Text="Wysyła zdefiniowaną w zakładce Auto: Ekwipunek listę komend — domyślnie wyjmuje z kontenera i sprzedaje „all.klej”/„all.gem”. Uruchamia się też automatycznie po wejściu do pokoju o nazwie z listy „Jubiler”/„Złotnik” w tej samej zakładce. Wymaga wcześniejszego zaznaczenia „/jubiler”. Działa też z paska komend oraz z timerów, triggerów i aliasów przez send(&quot;/jubiler&quot;)." />
+                  </Grid>
+                </Border>
+
+                <Border Classes="mud-section" Padding="14">
                   <Grid ColumnDefinitions="220,*" ColumnSpacing="18">
                     <TextBlock Grid.Column="0" Text="/mapuj &lt;klasa&gt;" FontWeight="Bold"
                                Foreground="{StaticResource MudBrushGoldBright}" />

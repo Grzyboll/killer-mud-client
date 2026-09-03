@@ -333,6 +333,7 @@ public sealed class MudDockFactory : Factory, IFactory
         NewTool("AutomationTravel", "⚙ Auto: Podróż", typeof(Views.Panels.TravelAutomationPanelView), _mainContext);
         NewTool("AutomationCombat", "⚙ Auto: Walka", typeof(Views.Panels.CombatAutomationPanelView), _mainContext);
         NewTool("AutomationFarm", "⚙ Auto: Farma", typeof(Views.Panels.FarmAutomationPanelView), _mainContext);
+        NewTool("AutomationInventory", "⚙ Auto: Ekwipunek", typeof(Views.Panels.InventoryAutomationPanelView), _mainContext);
         NewTool("Notes", "✎ Notatki", typeof(Views.Panels.NotesPanelView), _mainContext);
         NewTool("Gmcp", "⇅ GMCP", typeof(Views.Panels.GmcpPanelView), _mainContext);
         NewTool("Chat", "💬 Czat", typeof(Views.Panels.ChatPanelView), _mainContext);
@@ -407,6 +408,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var automationTravelTool = Tool("AutomationTravel");
         var automationCombatTool = Tool("AutomationCombat");
         var automationFarmTool = Tool("AutomationFarm");
+        var automationInventoryTool = Tool("AutomationInventory");
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var chatTool = Tool("Chat");
@@ -454,6 +456,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(automationTravelTool);
         HiddenTools.Add(automationCombatTool);
         HiddenTools.Add(automationFarmTool);
+        HiddenTools.Add(automationInventoryTool);
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(chatTool);
@@ -475,6 +478,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var automationTravelTool = Tool("AutomationTravel");
         var automationCombatTool = Tool("AutomationCombat");
         var automationFarmTool = Tool("AutomationFarm");
+        var automationInventoryTool = Tool("AutomationInventory");
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var chatTool = Tool("Chat");
@@ -559,6 +563,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(automationTravelTool);
         HiddenTools.Add(automationCombatTool);
         HiddenTools.Add(automationFarmTool);
+        HiddenTools.Add(automationInventoryTool);
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(settingsTool);

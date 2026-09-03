@@ -61,4 +61,43 @@ public sealed class RandomBookNamingTests
 
         Assert.Equal("duża księga triumfu (Paladyn)", result);
     }
+
+    // ====================================================================
+    // FindBookNames — same matching as AnnotateClasses, but returns the matched name itself
+    // (verbatim, as it appeared in the line) instead of splicing "(Klasa)" after it. This is what
+    // the "/autoget" automation uses to build a "get <name>" command.
+    // ====================================================================
+
+    [Fact]
+    public void FindBookNames_SingleMatch_ReturnsItVerbatim()
+    {
+        var names = RandomBookNaming.FindBookNames("Nosisz: duza ksiega triumfu.");
+
+        Assert.Equal(["duza ksiega triumfu"], names);
+    }
+
+    [Fact]
+    public void FindBookNames_MultipleMatchesInOneLine_ReturnsBothInOrder()
+    {
+        var names = RandomBookNaming.FindBookNames("duza ksiega triumfu obok mala ksiazka lasu");
+
+        Assert.Equal(["duza ksiega triumfu", "mala ksiazka lasu"], names);
+    }
+
+    [Fact]
+    public void FindBookNames_NoMatch_ReturnsEmpty()
+    {
+        Assert.Empty(RandomBookNaming.FindBookNames("Nosisz: zardzewialy miecz."));
+    }
+
+    [Fact]
+    public void FindBookNames_PreservesRealDiacriticsFromTheOriginalLine()
+    {
+        // Matching runs against a folded copy, but the returned name must come from the original
+        // text verbatim — this is fed straight into a "get <name>" command, so it must be typed
+        // exactly as the game would recognize it, diacritics included if the source had them.
+        var names = RandomBookNaming.FindBookNames("duża księga triumfu");
+
+        Assert.Equal(["duża księga triumfu"], names);
+    }
 }

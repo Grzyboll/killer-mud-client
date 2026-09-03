@@ -1,0 +1,98 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MudClient.App.ViewModels"
+             x:Class="MudClient.App.Views.Panels.InventoryAutomationPanelView"
+             x:DataType="vm:MainWindowViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="8" Margin="10,8,10,12">
+      <TextBlock Classes="mud-heading" Text="Automaty ekwipunku" />
+      <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                 Text="Automaty działające na całym noszonym ekwipunku." />
+
+      <Border Classes="mud-section" Padding="10">
+        <StackPanel Spacing="10">
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoRepairEnabled}"
+                      Content="/repair — napraw cały ekwipunek" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Zdejmuje cały ekwipunek („remove all”), zapamiętuje co zdjęła (z tekstu MUD-a — „Przestajesz używać &lt;przedmiot&gt;.”), naprawia po kolei każdy zdjęty przedmiot („repair &lt;przedmiot&gt;”), a na koniec zakłada wszystko z powrotem („wear all”). Musi być zaznaczone, zanim komenda „/repair” (pasek komend, timery, triggery, aliasy) cokolwiek zrobi — to zabezpieczenie przed przypadkowym rozebraniem postaci." />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,6,0,0">
+              <TextBlock Grid.Column="0" Text="{Binding RepairStatusText}"
+                         Classes="mud-faint" TextWrapping="Wrap"
+                         VerticalAlignment="Center" />
+              <Button Grid.Column="1" Content="Napraw teraz"
+                      IsEnabled="{Binding AutoRepairEnabled}"
+                      Command="{Binding RepairAllCommand}" />
+            </Grid>
+          </StackPanel>
+
+          <Border Height="1" Background="{StaticResource MudBrushSlate}" Margin="0,4" />
+
+          <StackPanel Spacing="3">
+            <TextBlock Classes="mud-label" Text="Kontenery na łup (klej / gem)" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Wspólne dla „/autoget” (gdzie łup trafia po zebraniu) i „/jubiler” (skąd łup jest wyjmowany przed sprzedażą) — zmień tutaj raz zamiast edytować obie listy komend osobno. Używane w nich przez „{klej}”/„{gem}”." />
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="8" Margin="0,4,0,0">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{}{klej}" FontFamily="Consolas" Classes="mud-faint" />
+                <TextBox Text="{Binding AutoLootGlueContainerName, UpdateSourceTrigger=PropertyChanged}"
+                         PlaceholderText="np. 2.tor" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Spacing="2">
+                <TextBlock Text="{}{gem}" FontFamily="Consolas" Classes="mud-faint" />
+                <TextBox Text="{Binding AutoLootGemContainerName, UpdateSourceTrigger=PropertyChanged}"
+                         PlaceholderText="np. 2.tor" />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+
+          <Border Height="1" Background="{StaticResource MudBrushSlate}" Margin="0,4" />
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoGetEnabled}"
+                      Content="/autoget — zbierz i posortuj łup" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Wysyła poniższe komendy po jednej w wierszu, w podanej kolejności — „{klej}”/„{gem}” są zamieniane na kontenery ustawione wyżej. Każda linia „exa”/„examine” czeka na odpowiedź i sprawdza ją pod kątem losowej księgi z Killeropedii (np. „duża księga triumfu”) — jeśli się znajdzie, dokłada „get &lt;księga&gt; &lt;cel&gt;”. Uruchamia się też automatycznie po komunikacie „Zdobyłeś &lt;liczba&gt; punktów doświadczenia.” (czyli po każdym zabiciu). Musi być zaznaczone, zanim komenda „/autoget” (pasek komend, timery, triggery, aliasy) albo świeże zabicie cokolwiek zrobi." />
+            <TextBlock Margin="0,6,0,0" Text="Komendy" />
+            <TextBox Text="{Binding AutoGetCommandsText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     Height="140"
+                     TextWrapping="Wrap"
+                     FontFamily="Consolas"
+                     PlaceholderText="np. get all.klej cia&#x0a;exa cia&#x0a;put all.klej {klej}" />
+            <Button Content="Wykonaj teraz"
+                    HorizontalAlignment="Left" Margin="0,6,0,0"
+                    IsEnabled="{Binding AutoGetEnabled}"
+                    Command="{Binding AutoGetCommand}" />
+          </StackPanel>
+
+          <Border Height="1" Background="{StaticResource MudBrushSlate}" Margin="0,4" />
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoJubilerEnabled}"
+                      Content="/jubiler — sprzedaj łup u jubilera" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Uruchamia się automatycznie po wejściu do pokoju o nazwie z listy poniżej, a także ręcznie — komendą „/jubiler” (pasek komend, timery, triggery, aliasy) albo przyciskiem. Musi być zaznaczone, zanim cokolwiek zrobi — zarówno automatycznie, jak i ręcznie." />
+            <TextBlock Margin="0,6,0,0" Text="Nazwy pokoi (jedna na wiersz)" />
+            <TextBox Text="{Binding AutoJubilerRoomNamesText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     Height="50"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jubiler&#x0a;Złotnik" />
+            <TextBlock Margin="0,6,0,0" Text="Komendy" />
+            <TextBox Text="{Binding AutoJubilerCommandsText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     Height="90"
+                     TextWrapping="Wrap"
+                     FontFamily="Consolas"
+                     PlaceholderText="np. rem all.klej {klej}&#x0a;sell all.klej" />
+            <Button Content="Wykonaj teraz"
+                    HorizontalAlignment="Left" Margin="0,6,0,0"
+                    IsEnabled="{Binding AutoJubilerEnabled}"
+                    Command="{Binding AutoJubilerCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

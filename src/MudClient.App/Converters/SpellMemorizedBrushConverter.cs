@@ -35,3 +35,31 @@ public sealed class SpellMemorizedBrushConverter : IMultiValueConverter
             : Brushes.Crimson;
     }
 }
+
+/// <summary>Colors the small "mem" indicator next to a tracked buff's name in the Mem i Buffy
+/// panel — the theme's default (light/parchment) foreground when
+/// <see cref="Models.BuffWatchEntry.IsMemorized"/> is true, crimson red when it's false. Unlike
+/// <see cref="SpellMemorizedBrushConverter"/> (which only reddens a button background, leaving the
+/// "memorized" case unstyled), this always returns a concrete brush so the label reads correctly
+/// standing alone rather than relying on a caller's own default foreground.</summary>
+public sealed class MemorizedIndicatorForegroundConverter : IValueConverter
+{
+    public static readonly MemorizedIndicatorForegroundConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is true)
+        {
+            return Application.Current?.TryFindResource("MudBrushParchment", out var brush) == true
+                ? brush
+                : Brushes.White;
+        }
+
+        return Application.Current?.TryFindResource("MudBrushCrimsonBright", out var crimsonBrush) == true
+            ? crimsonBrush
+            : Brushes.Crimson;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}

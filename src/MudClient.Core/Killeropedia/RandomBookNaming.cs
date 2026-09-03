@@ -89,14 +89,8 @@ public static class RandomBookNaming
     /// </remarks>
     public static string AnnotateClasses(string line)
     {
-        if (!line.Contains(' '))
-        {
-            return line;
-        }
-
-        var folded = PolishText.Fold(line);
-        var matches = Pattern.Matches(folded);
-        if (matches.Count == 0)
+        var matches = FindMatches(line);
+        if (matches is null)
         {
             return line;
         }
@@ -117,6 +111,46 @@ public static class RandomBookNaming
 
         builder.Append(line, lastIndex, line.Length - lastIndex);
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Returns every recognized random-book name found in <paramref name="line"/>, exactly as it
+    /// appears in the original text (diacritics/case preserved, same offsets <see cref="AnnotateClasses"/>
+    /// splices its "(Klasa)" suffix at) — the correct literal form to pass straight to a "get
+    /// &lt;name&gt;" command. Empty when nothing matches.
+    /// </summary>
+    public static IReadOnlyList<string> FindBookNames(string line)
+    {
+        var matches = FindMatches(line);
+        if (matches is null)
+        {
+            return [];
+        }
+
+        var names = new List<string>(matches.Count);
+        foreach (Match match in matches)
+        {
+            names.Add(line.Substring(match.Index, match.Length));
+        }
+
+        return names;
+    }
+
+    /// <summary>Shared by <see cref="AnnotateClasses"/> and <see cref="FindBookNames"/> — see
+    /// <see cref="AnnotateClasses"/>'s remarks for why matching runs against a folded copy while
+    /// the match offsets stay valid against <paramref name="line"/> itself. Null (not an empty
+    /// collection) when there's nothing to match, so callers can cheaply short-circuit without
+    /// allocating.</summary>
+    private static MatchCollection? FindMatches(string line)
+    {
+        if (!line.Contains(' '))
+        {
+            return null;
+        }
+
+        var folded = PolishText.Fold(line);
+        var matches = Pattern.Matches(folded);
+        return matches.Count == 0 ? null : matches;
     }
 
     private static IReadOnlyDictionary<string, string> BuildClassLookup()

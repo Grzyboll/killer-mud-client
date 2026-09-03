@@ -50,6 +50,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly AbilityMappingCoordinator _abilityMappingCoordinator;
     private readonly ArtifactTryStore _artifactTryStore;
     private readonly ArtifactTryMappingCoordinator _artifactTryMappingCoordinator;
+    private readonly AutoRepairCoordinator _autoRepairCoordinator;
+    private bool _autoRepairRunning;
+    private readonly AutoGetCoordinator _autoGetCoordinator;
+    private bool _autoGetRunning;
     private readonly GroupSpellStore _groupSpellStore;
     private readonly GmcpLocationResolver _locationResolver = new();
     private readonly RoomExitsResolver _roomExits = new();
@@ -241,6 +245,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     // Drives the same _autowalkPath/_autowalkStep machinery as a named-location walk — see
     // CompleteAutowalkArrival.
     private bool _autoFarmActive;
+    // True while a run is temporarily halted via PauseAutoFarm — unlike StopAutoFarm, pausing
+    // keeps _autoFarmVisitedRoomIds/_autoFarmVisitOrder intact so ResumeAutoFarm can pick the
+    // route back up instead of the farm starting over from scratch.
+    private bool _autoFarmPaused;
     private IReadOnlyList<FarmRegion> _autoFarmRegions = [];
     private HashSet<int> _autoFarmVisitedRoomIds = [];
     // Full visiting order planned once at StartAutoFarm via FarmTraversalPlanner.BuildVisitOrder
@@ -268,6 +276,15 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private static readonly TimeSpan AutowalkStuckStepTimeout = TimeSpan.FromSeconds(8);
     private int _autowalkStuckRecoveryAttempts;
     private const int MaxAutowalkStuckRecoveryAttempts = 2;
+
+    /// <summary>Stamped by every <see cref="SendTriggeredCommandAsync"/> call — the character's own
+    /// move command, but just as much any unrelated trigger/timer/alias firing mid-walk (e.g. a
+    /// "cast light" + "wear ..." trigger). <see cref="MonitorAutowalkStepStuckAsync"/> measures
+    /// silence since here rather than a fixed delay from the move command alone, so genuine
+    /// activity elsewhere keeps deferring the stuck check instead of it firing — and the room
+    /// getting wrongly marked closed — while the character is legitimately busy with something
+    /// else, not actually stuck on a blocked exit.</summary>
+    private DateTimeOffset _lastOutgoingCommandAtUtc = DateTimeOffset.MinValue;
     private int _autoFarmHpThresholdPercent = ProfileData.DefaultAutoFarmHpThresholdPercent;
     private int _autoFarmStepDelayMilliseconds;
     private List<string> _autoFarmHealSpellNames = [];
@@ -389,6 +406,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         AbilityMappingCoordinator? abilityMappingCoordinator = null,
         ArtifactTryStore? artifactTryStore = null,
         ArtifactTryMappingCoordinator? artifactTryMappingCoordinator = null,
+        AutoRepairCoordinator? autoRepairCoordinator = null,
+        AutoGetCoordinator? autoGetCoordinator = null,
         GroupSpellStore? groupSpellStore = null)
     {
         _triggers = new TriggerEngine { Aliases = _aliases };
@@ -413,6 +432,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _abilityMappingCoordinator = abilityMappingCoordinator ?? new AbilityMappingCoordinator();
         _artifactTryStore = artifactTryStore ?? new ArtifactTryStore();
         _artifactTryMappingCoordinator = artifactTryMappingCoordinator ?? new ArtifactTryMappingCoordinator();
+        _autoRepairCoordinator = autoRepairCoordinator ?? new AutoRepairCoordinator();
+        _autoGetCoordinator = autoGetCoordinator ?? new AutoGetCoordinator();
         _groupSpellStore = groupSpellStore ?? new GroupSpellStore();
         foreach (var shortcut in LoadGroupSpells(_groupSpellStore))
         {
@@ -479,6 +500,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         RecastBuffsCommand = new AsyncRelayCommand(RecastMissingBuffsAsync);
         RecastSingleBuffCommand = new AsyncRelayCommand<BuffWatchEntry>(RecastSingleBuffAsync);
         CastRefreshOnGroupCommand = new AsyncRelayCommand(CastRefreshOnGroupAsync);
+        RepairAllCommand = new AsyncRelayCommand(RepairAllAsync);
+        AutoGetCommand = new AsyncRelayCommand(AutoGetAllAsync);
+        AutoJubilerCommand = new RelayCommand(AutoJubilerAll);
         var defaultBuffSet = new BuffSetEntry { Name = "Domyślny" };
         BuffSets.Add(defaultBuffSet);
         _selectedBuffSet = defaultBuffSet;
@@ -493,6 +517,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         StopAutowalkCommand = new RelayCommand(() => StopAutowalk("Autowalk zatrzymany."));
         StartAutoFarmCommand = new RelayCommand(StartAutoFarm, CanStartAutoFarm);
         StopAutoFarmCommand = new RelayCommand(() => StopAutoFarm("Farma zatrzymana."), () => _autoFarmActive);
+        PauseAutoFarmCommand = new RelayCommand(PauseAutoFarm, () => _autoFarmActive && !_autoFarmPaused);
+        ResumeAutoFarmCommand = new RelayCommand(ResumeAutoFarm, () => _autoFarmActive && _autoFarmPaused);
         GoToTemporaryTargetCommand = new RelayCommand(() =>
         {
             if (_temporaryTarget is not null)
@@ -563,6 +589,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (savedLayout is { IsTransparencyLayout: true })
         {
             _dockFactory.TryApplySnapshot(Layout, savedLayout);
+            ApplySnapshotOverlaySettings(savedLayout);
         }
 
         _dockFactory.HiddenTools.CollectionChanged += OnHiddenToolsChanged;
@@ -586,6 +613,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ApplyLayoutCommand = new RelayCommand<string>(ApplyLayout);
         SaveLayoutCommand = new RelayCommand(SaveLayout);
         DeleteLayoutCommand = new RelayCommand<string>(DeleteLayout);
+        SetDefaultStartupLayoutCommand = new RelayCommand<string>(SetDefaultStartupLayout);
+
+        // The constructor already bootstrapped TRANSPARENCY above (with any remembered dock-layout
+        // .json session restored into it) — only re-switch here if the user picked a DIFFERENT
+        // layout as their startup default. Null or "TRANSPARENCY" both mean "keep the bootstrap
+        // as-is", so this never redundantly rebuilds it.
+        if (!string.IsNullOrWhiteSpace(_settings.DefaultStartupLayoutName)
+            && !string.Equals(_settings.DefaultStartupLayoutName, LayoutPresetService.TransparencyName, StringComparison.Ordinal))
+        {
+            ApplyLayout(_settings.DefaultStartupLayoutName);
+        }
+
         OpenKilleropediaCommand = new RelayCommand(() =>
         {
             IsHelpOpen = false;
@@ -708,6 +747,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public IRelayCommand<string> DeleteLayoutCommand { get; }
 
+    public IRelayCommand<string> SetDefaultStartupLayoutCommand { get; }
+
     public IRelayCommand OpenKilleropediaCommand { get; }
 
     public IRelayCommand OpenHelpCommand { get; }
@@ -809,14 +850,43 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void RefreshAvailableLayouts()
     {
+        bool IsDefault(string name) => string.Equals(_settings.DefaultStartupLayoutName, name, StringComparison.Ordinal);
+
         AvailableLayouts.Clear();
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.DefaultName, CanDelete = false });
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.TransparencyName, CanDelete = false });
-        AvailableLayouts.Add(new LayoutMenuItem { Name = LayoutPresetService.CompactName, CanDelete = false });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.DefaultName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.DefaultName),
+        });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.TransparencyName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.TransparencyName),
+        });
+        AvailableLayouts.Add(new LayoutMenuItem
+        {
+            Name = LayoutPresetService.CompactName, CanDelete = false, IsDefaultStartup = IsDefault(LayoutPresetService.CompactName),
+        });
         foreach (var preset in _layoutPresets)
         {
-            AvailableLayouts.Add(new LayoutMenuItem { Name = preset.Name, CanDelete = true });
+            AvailableLayouts.Add(new LayoutMenuItem { Name = preset.Name, CanDelete = true, IsDefaultStartup = IsDefault(preset.Name) });
         }
+    }
+
+    /// <summary>Backs the star button next to each entry in the "Układy paneli" flyout — toggles
+    /// whether that layout is switched to right after startup (see
+    /// <see cref="AppSettings.DefaultStartupLayoutName"/>). Clicking the current default's star
+    /// clears it, falling back to the normal TRANSPARENCY bootstrap.</summary>
+    private void SetDefaultStartupLayout(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        _settings.DefaultStartupLayoutName = string.Equals(_settings.DefaultStartupLayoutName, name, StringComparison.Ordinal)
+            ? null
+            : name;
+        SaveSettings();
+        RefreshAvailableLayouts();
     }
 
     /// <summary>Restores the built-in default layout, the built-in transparency layout, or a
@@ -874,6 +944,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 {
                     // Snapshot no longer matches the current set of panels (e.g. after an update).
                     AddToast($"Układ „{name}” jest nieaktualny — wczytano DEFAULT.", "warning");
+                }
+                else
+                {
+                    ApplySnapshotOverlaySettings(preset.Snapshot);
+                    SaveSettings();
                 }
             }
         }
@@ -1005,17 +1080,85 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        foreach (var entry in _settings.TerminalOverlays.ToList())
+        // Each PinToolAsOverlay below raises OverlayChanged synchronously, whose handler
+        // (OnOverlayChanged) rebuilds _settings.TerminalOverlays from whatever's pinned SO FAR
+        // (see SyncTerminalOverlaysFromFactory) — restoring 2+ remembered overlays one at a time
+        // with that handler still wired would overwrite not-yet-pinned entries' saved
+        // column/width with freshly-defaulted ones the moment the NEXT overlay gets pinned.
+        // Unhooking it for the loop and syncing once at the end avoids that self-clobbering.
+        _dockFactory.OverlayChanged -= OnOverlayChanged;
+        try
         {
-            var tool = _dockFactory.AllTools.FirstOrDefault(t => t.Id == entry.PanelId);
-            if (tool is null || string.Equals(tool.Id, "Terminal", StringComparison.Ordinal))
+            foreach (var entry in _settings.TerminalOverlays.ToList())
             {
-                continue;
-            }
+                var tool = _dockFactory.AllTools.FirstOrDefault(t => t.Id == entry.PanelId);
+                if (tool is null || string.Equals(tool.Id, "Terminal", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            _dockFactory.PinToolAsOverlay(tool);
+                _dockFactory.PinToolAsOverlay(tool);
+            }
+        }
+        finally
+        {
+            _dockFactory.OverlayChanged += OnOverlayChanged;
+        }
+
+        SyncTerminalOverlaysFromFactory();
+    }
+
+    /// <summary>Snapshots the dock tree plus (in TRANSPARENCY mode) a copy of the live overlay
+    /// arrangement <see cref="ApplyOverlayFromSettings"/> reads from — see
+    /// <see cref="DockLayoutSnapshot.TerminalOverlays"/> for why the copy is needed. Shared by the
+    /// session auto-save-on-close and by <see cref="SaveLayout"/> so a saved layout reproduces the
+    /// overlay arrangement it had when saved, not whatever the live settings currently hold.</summary>
+    private DockLayoutSnapshot SnapshotLayoutWithOverlays()
+    {
+        var snapshot = _dockFactory.Snapshot(Layout);
+        if (_dockFactory.IsTransparencyLayout)
+        {
+            snapshot.TerminalOverlays = CopyTerminalOverlays(_settings.TerminalOverlays);
+            snapshot.TerminalOverlayOpacity = _settings.TerminalOverlayOpacity;
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>Copies a snapshot's own overlay arrangement (if it carries one) onto the live
+    /// settings <see cref="ApplyOverlayFromSettings"/> reads from, so restoring a saved
+    /// TRANSPARENCY layout reproduces the columns/order/sizes it had when saved instead of
+    /// whatever the live settings currently hold. A no-op for a snapshot saved before this was
+    /// tracked (empty list) or one that was never in TRANSPARENCY mode. Deliberately does not
+    /// call <see cref="SaveSettings"/> itself — the constructor's startup-restore call site must
+    /// not write settings.json before <see cref="ActivateProfile"/> has had a chance to read it
+    /// for <see cref="LoadLegacyAutomationSettingsSeed"/>'s one-time migration (a profile created
+    /// after that write would otherwise see the just-rewritten AppSettings shape instead of the
+    /// original file, silently losing any legacy field AppSettings itself never had); callers
+    /// that need it persisted (e.g. an explicit "Wczytaj układ" click) save explicitly instead.</summary>
+    private void ApplySnapshotOverlaySettings(DockLayoutSnapshot snapshot)
+    {
+        if (!snapshot.IsTransparencyLayout || snapshot.TerminalOverlays.Count == 0)
+        {
+            return;
+        }
+
+        _settings.TerminalOverlays = CopyTerminalOverlays(snapshot.TerminalOverlays);
+        if (snapshot.TerminalOverlayOpacity is { } opacity)
+        {
+            _settings.TerminalOverlayOpacity = opacity;
         }
     }
+
+    private static List<TerminalOverlayEntry> CopyTerminalOverlays(IEnumerable<TerminalOverlayEntry> entries) =>
+        entries.Select(entry => new TerminalOverlayEntry
+        {
+            PanelId = entry.PanelId,
+            HeightWeight = entry.HeightWeight,
+            ColumnIndex = entry.ColumnIndex,
+            ColumnWidth = entry.ColumnWidth,
+            ColumnHeightFraction = entry.ColumnHeightFraction,
+        }).ToList();
 
     private void SaveLayout()
     {
@@ -1033,7 +1176,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var snapshot = _dockFactory.Snapshot(Layout);
+        var snapshot = SnapshotLayoutWithOverlays();
         var existing = _layoutPresets.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.Ordinal));
         if (existing is not null)
         {
@@ -1292,7 +1435,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         var tattoos = TattooCatalogLoader.Load(
             downloadedDirectory is null ? null : Path.Combine(downloadedDirectory, "tattoos.json"));
         var lore = LoadLoreCatalog(downloadedDirectory);
-        return new KilleropediaViewModel(
+        var killeropedia = new KilleropediaViewModel(
             teachers,
             _bookCatalogStore,
             RefreshBookCatalogAsync,
@@ -1304,7 +1447,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             tattoos,
             _rareCatalogStore,
             RefreshRareCatalogAsync,
-            _abilityCaptureStore);
+            _abilityCaptureStore)
+        {
+            // So the Nauczyciele view's skill/trick coloring starts correct immediately, matching
+            // whatever the map already knows — not just after the next "skill" command output.
+            SkillKnowledge = new Dictionary<string, int>(_knownSkills, StringComparer.OrdinalIgnoreCase),
+        };
+        return killeropedia;
     }
 
     private LoreCatalogData LoadLoreCatalog(string? downloadedDirectory)
@@ -2267,6 +2416,147 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>Arms the "/repair" meta-command — see <see cref="RepairAllAsync"/>.</summary>
+    public bool AutoRepairEnabled
+    {
+        get => _profileSettings.AutoRepairEnabled;
+        set
+        {
+            if (_profileSettings.AutoRepairEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoRepairEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>Arms the "/autoget" meta-command — see <see cref="AutoGetAll"/>.</summary>
+    public bool AutoGetEnabled
+    {
+        get => _profileSettings.AutoGetEnabled;
+        set
+        {
+            if (_profileSettings.AutoGetEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoGetEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoGetCommandsText"/>.</summary>
+    public string AutoGetCommandsText
+    {
+        get => _profileSettings.AutoGetCommandsText;
+        set
+        {
+            var commands = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoGetCommandsText, commands, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoGetCommandsText = commands;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoLootGlueContainerName"/>.</summary>
+    public string AutoLootGlueContainerName
+    {
+        get => _profileSettings.AutoLootGlueContainerName;
+        set
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? "2.tor" : value.Trim();
+            if (string.Equals(_profileSettings.AutoLootGlueContainerName, trimmed, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoLootGlueContainerName = trimmed;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoLootGemContainerName"/>.</summary>
+    public string AutoLootGemContainerName
+    {
+        get => _profileSettings.AutoLootGemContainerName;
+        set
+        {
+            var trimmed = string.IsNullOrWhiteSpace(value) ? "2.tor" : value.Trim();
+            if (string.Equals(_profileSettings.AutoLootGemContainerName, trimmed, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoLootGemContainerName = trimmed;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>Arms the "/jubiler" meta-command — see <see cref="AutoJubilerAll"/>.</summary>
+    public bool AutoJubilerEnabled
+    {
+        get => _profileSettings.AutoJubilerEnabled;
+        set
+        {
+            if (_profileSettings.AutoJubilerEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoJubilerEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoJubilerRoomNames"/>.</summary>
+    public string AutoJubilerRoomNamesText
+    {
+        get => string.Join(Environment.NewLine, _profileSettings.AutoJubilerRoomNames);
+        set
+        {
+            var names = ParseMobNameLines(value);
+            if (_profileSettings.AutoJubilerRoomNames.SequenceEqual(names, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoJubilerRoomNames = names;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoJubilerCommandsText"/>.</summary>
+    public string AutoJubilerCommandsText
+    {
+        get => _profileSettings.AutoJubilerCommandsText;
+        set
+        {
+            var commands = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoJubilerCommandsText, commands, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoJubilerCommandsText = commands;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public string AutowieldWeaponName
     {
         get => _profileSettings.AutowieldWeaponName;
@@ -2545,6 +2835,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
+        OnPropertyChanged(nameof(AutoRepairEnabled));
+        OnPropertyChanged(nameof(AutoGetEnabled));
+        OnPropertyChanged(nameof(AutoGetCommandsText));
+        OnPropertyChanged(nameof(AutoLootGlueContainerName));
+        OnPropertyChanged(nameof(AutoLootGemContainerName));
+        OnPropertyChanged(nameof(AutoJubilerEnabled));
+        OnPropertyChanged(nameof(AutoJubilerRoomNamesText));
+        OnPropertyChanged(nameof(AutoJubilerCommandsText));
         OnPropertyChanged(nameof(LordModeEnabled));
     }
 
@@ -3436,6 +3734,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand StopAutowalkCommand { get; }
     public RelayCommand StartAutoFarmCommand { get; }
     public RelayCommand StopAutoFarmCommand { get; }
+    public RelayCommand PauseAutoFarmCommand { get; }
+    public RelayCommand ResumeAutoFarmCommand { get; }
 
     public string NewLocationName
     {
@@ -3584,9 +3884,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         SaveActiveProfile();
     }
 
-    /// <summary>Shared by <see cref="AutoAssistExcludedMobNamesText"/> and
-    /// <see cref="OnMapAutoKillMobNamesChanged"/>: one mob name per line, trimmed, deduplicated
-    /// case-insensitively.</summary>
+    /// <summary>Shared by <see cref="AutoAssistExcludedMobNamesText"/>,
+    /// <see cref="OnMapAutoKillMobNamesChanged"/>, and <see cref="AutoJubilerRoomNamesText"/>: one
+    /// name per line, trimmed, deduplicated case-insensitively — mob names for the first two, room
+    /// names for the third, same list shape either way.</summary>
     private static List<string> ParseMobNameLines(string? text) =>
         (text ?? string.Empty)
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -3697,6 +3998,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // In case Room.People for this room already arrived before LocationChanged fired —
             // otherwise TryAutoKillIfConfirmed fires again from OnRoomPeopleChanged as it updates.
             TryAutoKillIfConfirmed();
+        }
+
+        if (AutoJubilerEnabled)
+        {
+            TryAutoJubiler(Map.MapIndex?.FindFirstRoomByVnum(vnum)?.Name);
         }
     }
 
@@ -4177,16 +4483,36 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Backstop for a move command the server silently swallows (see the
-    /// <see cref="_autowalkStuckRecoveryAttempts"/> field comment) — waits
-    /// <see cref="AutowalkStuckStepTimeout"/> and, if <paramref name="step"/> still hasn't advanced
-    /// by then, hands off to <see cref="HandleAutowalkStepStuck"/>. A normal room-change (or the
+    /// <see cref="_autowalkStuckRecoveryAttempts"/> field comment) — waits for
+    /// <see cref="AutowalkStuckStepTimeout"/> of genuine silence (no <em>any</em> outgoing command,
+    /// not just this one — see <see cref="_lastOutgoingCommandAtUtc"/>) and, if <paramref name="step"/>
+    /// still hasn't advanced by then, hands off to <see cref="HandleAutowalkStepStuck"/>. Re-checks
+    /// in a loop rather than sleeping once: an unrelated trigger/timer/alias firing mid-step (e.g.
+    /// "cast light" then "wear ...") keeps pushing the deadline out for as long as it keeps sending
+    /// commands, instead of a fixed 8s window elapsing regardless and falsely declaring the exit
+    /// blocked while the character is simply busy with something else. A normal room-change (or the
     /// walk stopping/replacing) races this harmlessly: whichever happens first wins, and this task
     /// simply finds nothing to do when it loses.</summary>
     private async Task MonitorAutowalkStepStuckAsync(int step, CancellationToken cancellationToken)
     {
+        // Never fire sooner than AutowalkStuckStepTimeout after THIS monitor started, even if
+        // _lastOutgoingCommandAtUtc happens to already be stale at that instant — SendAutowalkStep
+        // starts this task and the move command's own send racing each other, so the timestamp
+        // isn't guaranteed to reflect this step's command yet on the very first check.
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
         try
         {
-            await Task.Delay(AutowalkStuckStepTimeout, cancellationToken);
+            while (true)
+            {
+                var remaining = GetRemainingStuckWait(
+                    DateTimeOffset.UtcNow, monitorStartedAtUtc, _lastOutgoingCommandAtUtc, AutowalkStuckStepTimeout);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+
+                await Task.Delay(remaining, cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -4194,6 +4520,25 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         Dispatcher.UIThread.Post(() => HandleAutowalkStepStuck(step, cancellationToken));
+    }
+
+    /// <summary>Pure decision behind <see cref="MonitorAutowalkStepStuckAsync"/>'s wait loop: how
+    /// much longer (never negative) to keep waiting before treating the step as stuck. The
+    /// baseline is whichever is more recent of <paramref name="monitorStartedAtUtc"/> (so the
+    /// monitor never fires sooner than <paramref name="timeout"/> after it started, regardless of a
+    /// stale <paramref name="lastOutgoingCommandAtUtc"/> read on its very first check — see that
+    /// method's own doc comment) and <paramref name="lastOutgoingCommandAtUtc"/> (so any activity
+    /// since — the walk's own move command, or anything else, e.g. an unrelated trigger — keeps
+    /// pushing the deadline out).</summary>
+    internal static TimeSpan GetRemainingStuckWait(
+        DateTimeOffset now,
+        DateTimeOffset monitorStartedAtUtc,
+        DateTimeOffset lastOutgoingCommandAtUtc,
+        TimeSpan timeout)
+    {
+        var baseline = lastOutgoingCommandAtUtc > monitorStartedAtUtc ? lastOutgoingCommandAtUtc : monitorStartedAtUtc;
+        var remaining = timeout - (now - baseline);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
     private void HandleAutowalkStepStuck(int step, CancellationToken cancellationToken)
@@ -4715,6 +5060,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsAutoFarmActive => _autoFarmActive;
 
+    /// <summary>See <see cref="_autoFarmPaused"/>.</summary>
+    public bool IsAutoFarmPaused => _autoFarmPaused;
+
     public string AutoFarmStatusText
     {
         get => _autoFarmStatusText;
@@ -4963,8 +5311,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         _autoFarmActive = false;
+        _autoFarmPaused = false;
         _autoFarmVisitOrder = null;
         OnPropertyChanged(nameof(IsAutoFarmActive));
+        OnPropertyChanged(nameof(IsAutoFarmPaused));
         AutoFarmStatusText = "Farma nieaktywna.";
         RefreshCommands();
         // The yellow "visited" coloring is scoped to this farm run only — clear it on stop.
@@ -4978,6 +5328,45 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             AddToast(message, "info");
         }
+    }
+
+    /// <summary>Temporarily halts an active farm run without forgetting its progress — unlike
+    /// <see cref="StopAutoFarm"/>, this leaves <see cref="_autoFarmVisitedRoomIds"/> and
+    /// <see cref="_autoFarmVisitOrder"/> untouched (and keeps the yellow "visited" map coloring),
+    /// so <see cref="ResumeAutoFarm"/> can continue the same route instead of the farm starting
+    /// over from the current room. Only stops the current travel step; the HP-threshold combat
+    /// heal safety net (<see cref="TryAutoFarmCombatHeal"/>) keeps working while paused.</summary>
+    private void PauseAutoFarm()
+    {
+        if (!_autoFarmActive || _autoFarmPaused)
+        {
+            return;
+        }
+
+        _autoFarmPaused = true;
+        OnPropertyChanged(nameof(IsAutoFarmPaused));
+        AutoFarmStatusText = "Farma wstrzymana.";
+        RefreshCommands();
+
+        if (_autowalkPath is not null)
+        {
+            StopAutowalk("Farma wstrzymana.");
+        }
+    }
+
+    /// <summary>Resumes a run paused via <see cref="PauseAutoFarm"/> exactly where it left off —
+    /// just re-enters <see cref="ContinueAutoFarm"/> since pausing never replanned anything.</summary>
+    private void ResumeAutoFarm()
+    {
+        if (!_autoFarmActive || !_autoFarmPaused)
+        {
+            return;
+        }
+
+        _autoFarmPaused = false;
+        OnPropertyChanged(nameof(IsAutoFarmPaused));
+        RefreshCommands();
+        ContinueAutoFarm();
     }
 
     /// <summary>Mirrors <see cref="_autoFarmVisitedRoomIds"/> onto <see cref="Map"/> as a fresh
@@ -4994,7 +5383,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// (arrival loops back here through <see cref="CompleteAutowalkArrival"/>).</summary>
     private void ContinueAutoFarm()
     {
-        if (!_autoFarmActive)
+        if (!_autoFarmActive || _autoFarmPaused)
         {
             return;
         }
@@ -5114,7 +5503,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (!_autoFarmActive)
+            if (!_autoFarmActive || _autoFarmPaused)
             {
                 return;
             }
@@ -5809,6 +6198,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand RecastBuffsCommand { get; }
     public AsyncRelayCommand<BuffWatchEntry> RecastSingleBuffCommand { get; }
     public AsyncRelayCommand CastRefreshOnGroupCommand { get; }
+    public AsyncRelayCommand RepairAllCommand { get; }
+    public AsyncRelayCommand AutoGetCommand { get; }
+    public RelayCommand AutoJubilerCommand { get; }
 
     /// <summary>Header badge for the buffs section, e.g. "2/3" (active/required).</summary>
     public string BuffsBadge => RequiredBuffs.Count == 0
@@ -5978,10 +6370,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        RequiredBuffs.Add(new BuffWatchEntry(name)
+        var buff = new BuffWatchEntry(name)
         {
             IsActive = _activeAffectNames.Contains(normalized),
-        });
+        };
+        ApplyMemorizationStatus(buff);
+        RequiredBuffs.Add(buff);
         NewBuffName = string.Empty;
         RefreshBuffIndicators();
         SaveActiveProfile();
@@ -6042,6 +6436,216 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         await SendTriggeredCommandAsync($"cast \"{entry.Name}\" self");
+    }
+
+    // ========================================================================
+    // Auto: Ekwipunek — "/repair" meta-command
+    // ========================================================================
+
+    private string _repairStatusText = "Nieaktywne.";
+
+    /// <summary>Live progress text for the Auto: Ekwipunek panel while <see cref="RepairAllAsync"/>
+    /// runs — "Zdejmuję ekwipunek...", then one line per item repaired, then "Zakładam ekwipunek
+    /// z powrotem...".</summary>
+    public string RepairStatusText
+    {
+        get => _repairStatusText;
+        private set => SetProperty(ref _repairStatusText, value);
+    }
+
+    /// <summary>
+    /// The "/repair" meta-command: "remove all", learn what came off from the MUD's own text (see
+    /// <see cref="AutoRepairCoordinator"/> — GMCP has no equipment data for this), "repair
+    /// &lt;przedmiot&gt;" for each one, then "wear all". Gated behind <see cref="AutoRepairEnabled"/>
+    /// so a stray "/repair" (mistyped alias, accidental keystroke) can't strip and reforge the
+    /// whole outfit unless the player has explicitly armed it first in Auto: Ekwipunek.
+    /// </summary>
+    private async Task RepairAllAsync()
+    {
+        if (!IsConnected)
+        {
+            AddToast("Nie połączono — nie można wykonać /repair.", "error");
+            return;
+        }
+
+        if (!AutoRepairEnabled)
+        {
+            AddToast("Najpierw zaznacz „/repair” w zakładce Auto: Ekwipunek.", "error");
+            return;
+        }
+
+        if (_autoRepairRunning)
+        {
+            AddToast("/repair już trwa.", "info");
+            return;
+        }
+
+        _autoRepairRunning = true;
+        // Progress<T> only marshals back to the UI thread when constructed with one already
+        // current — true when "/repair" was typed or the button clicked, but NOT when it fires
+        // via a timer/trigger/alias off the UI thread. Post explicitly instead of relying on
+        // Progress<T>'s ambient SynchronizationContext capture, so RepairStatusText (UI-bound) is
+        // always touched on the UI thread regardless of which path invoked this.
+        var progress = new Progress<string>(text => Dispatcher.UIThread.Post(() => RepairStatusText = text));
+        try
+        {
+            var repaired = await _autoRepairCoordinator.RunAsync(SendTriggeredCommandAsync, progress);
+            RepairStatusText = repaired.Count == 0
+                ? "Nic nie było założone."
+                : $"Gotowe — naprawiono {repaired.Count} przedmiotów.";
+            AddToast(RepairStatusText, "info");
+        }
+        catch (TimeoutException exception)
+        {
+            RepairStatusText = "Przerwane: brak odpowiedzi z MUD-a.";
+            AddToast($"/repair: {exception.Message}", "error");
+        }
+        catch (InvalidOperationException exception)
+        {
+            AddToast($"/repair: {exception.Message}", "error");
+        }
+        finally
+        {
+            _autoRepairRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// The "/autoget" meta-command: sends <see cref="AutoGetCommandsText"/> one line per command,
+    /// in order — e.g. loot specific items off a corpse and sort them into a bag. Unlike "/jubiler"
+    /// this can't be a plain fire-and-forget list: any "exa"/"examine" line needs its response
+    /// captured and scanned for a random magic-book name (see <see cref="AutoGetCoordinator"/>), so
+    /// a book revealed by examining the corpse actually gets picked up instead of just sitting
+    /// there. Gated behind <see cref="AutoGetEnabled"/> for the same accidental-keystroke reason
+    /// "/repair" is gated behind <see cref="AutoRepairEnabled"/>.
+    /// </summary>
+    private async Task AutoGetAllAsync()
+    {
+        if (!IsConnected)
+        {
+            AddToast("Nie połączono — nie można wykonać /autoget.", "error");
+            return;
+        }
+
+        if (!AutoGetEnabled)
+        {
+            AddToast("Najpierw zaznacz „/autoget” w zakładce Auto: Ekwipunek.", "error");
+            return;
+        }
+
+        if (_autoGetRunning)
+        {
+            AddToast("/autoget już trwa.", "info");
+            return;
+        }
+
+        var commandsText = ApplyLootContainerPlaceholders(AutoGetCommandsText);
+        var commands = CommandStacker.Split(commandsText, CommandStackingSeparator);
+        if (commands.Count == 0)
+        {
+            AddToast("Lista komend /autoget jest pusta.", "info");
+            return;
+        }
+
+        _autoGetRunning = true;
+        try
+        {
+            var pickedUpBooks = await _autoGetCoordinator.RunAsync(commands, SendTriggeredCommandAsync);
+            if (pickedUpBooks.Count > 0)
+            {
+                AddToast(
+                    $"/autoget: znaleziono i pobrano {pickedUpBooks.Count} losowych ksiąg ({string.Join(", ", pickedUpBooks)}).",
+                    "info");
+            }
+        }
+        catch (TimeoutException exception)
+        {
+            AddToast($"/autoget: {exception.Message}", "error");
+        }
+        catch (InvalidOperationException exception)
+        {
+            AddToast($"/autoget: {exception.Message}", "error");
+        }
+        finally
+        {
+            _autoGetRunning = false;
+        }
+    }
+
+    /// <summary>Substitutes "{klej}"/"{gem}" in a command-list template with
+    /// <see cref="AutoLootGlueContainerName"/>/<see cref="AutoLootGemContainerName"/> — the one
+    /// shared pair of variables <see cref="AutoGetCommandsText"/> (put) and
+    /// <see cref="AutoJubilerCommandsText"/> (rem) both resolve against, so the container only
+    /// needs changing in one place instead of in every command line that mentions it.</summary>
+    private string ApplyLootContainerPlaceholders(string commandsText) =>
+        commandsText
+            .Replace("{klej}", AutoLootGlueContainerName, StringComparison.Ordinal)
+            .Replace("{gem}", AutoLootGemContainerName, StringComparison.Ordinal);
+
+    /// <summary>Shared tail of <see cref="AutoJubilerAll"/> — "/jubiler" has no "exa" step of its
+    /// own that needs a response, so it stays a plain fire-and-forget list, unlike "/autoget" (see
+    /// <see cref="AutoGetAllAsync"/>/<see cref="AutoGetCoordinator"/>). Resolves the "{klej}"/
+    /// "{gem}" placeholders, splits into individual commands, and either queues them or reports why
+    /// there was nothing to send.</summary>
+    private void SendCommandLines(string commandsTemplate, string commandName)
+    {
+        var commandsText = ApplyLootContainerPlaceholders(commandsTemplate);
+        var commands = CommandStacker.Split(commandsText, CommandStackingSeparator);
+        if (commands.Count == 0)
+        {
+            AddToast($"Lista komend {commandName} jest pusta.", "info");
+            return;
+        }
+
+        QueueTriggeredCommands(commands);
+    }
+
+    /// <summary>
+    /// The "/jubiler" meta-command: sends <see cref="AutoJubilerCommandsText"/> verbatim (same
+    /// shape as "/autoget") — by default, takes the looted glue/gems back out of their container
+    /// and sells them. Also fires automatically on entering a room named in
+    /// <see cref="AutoJubilerRoomNamesText"/> (see <see cref="TryAutoJubiler"/>), gated behind the
+    /// same <see cref="AutoJubilerEnabled"/> flag either way.
+    /// </summary>
+    private void AutoJubilerAll()
+    {
+        if (!IsConnected)
+        {
+            AddToast("Nie połączono — nie można wykonać /jubiler.", "error");
+            return;
+        }
+
+        if (!AutoJubilerEnabled)
+        {
+            AddToast("Najpierw zaznacz „/jubiler” w zakładce Auto: Ekwipunek.", "error");
+            return;
+        }
+
+        SendCommandLines(AutoJubilerCommandsText, "/jubiler");
+    }
+
+    /// <summary>Fires <see cref="AutoJubilerAll"/> when <paramref name="roomName"/> matches one of
+    /// <see cref="AutoJubilerRoomNamesText"/> — called from <see cref="OnRoomEnterAutomations"/>
+    /// with the newly entered room's name. Compares via <see cref="PolishText.Fold"/> on both sides:
+    /// the room name comes from the local map, which may or may not carry proper Polish diacritics,
+    /// while the MUD's own text (everything else in this module gets matched against) never
+    /// does.</summary>
+    private void TryAutoJubiler(string? roomName)
+    {
+        if (!AutoJubilerEnabled || string.IsNullOrWhiteSpace(roomName))
+        {
+            return;
+        }
+
+        var foldedRoomName = PolishText.Fold(roomName).Trim();
+        var isJubilerRoom = _profileSettings.AutoJubilerRoomNames.Any(name =>
+            string.Equals(PolishText.Fold(name).Trim(), foldedRoomName, StringComparison.OrdinalIgnoreCase));
+        if (!isJubilerRoom)
+        {
+            return;
+        }
+
+        AutoJubilerAll();
     }
 
     /// <summary>Orders every other (non-NPC) group member to cast refresh on themselves, in turn,
@@ -6594,6 +7198,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         Map.SkillKnowledge = new Dictionary<string, int>(_knownSkills, StringComparer.OrdinalIgnoreCase);
+        Killeropedia.SkillKnowledge = new Dictionary<string, int>(_knownSkills, StringComparer.OrdinalIgnoreCase);
 
         // A profile saved before multiple regions were supported only has the single legacy
         // field — migrate it into a one-entry list instead of silently dropping the character's
@@ -6676,10 +7281,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(buffName))
                 {
-                    set.Buffs.Add(new BuffWatchEntry(buffName)
+                    var buff = new BuffWatchEntry(buffName)
                     {
                         IsActive = _activeAffectNames.Contains(BuffWatchEntry.NormalizeName(buffName)),
-                    });
+                    };
+                    ApplyMemorizationStatus(buff);
+                    set.Buffs.Add(buff);
                 }
             }
 
@@ -8706,6 +9313,24 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 continue;
             }
 
+            if (string.Equals(segment, "/repair", StringComparison.OrdinalIgnoreCase))
+            {
+                await RepairAllAsync();
+                continue;
+            }
+
+            if (string.Equals(segment, "/autoget", StringComparison.OrdinalIgnoreCase))
+            {
+                await AutoGetAllAsync();
+                continue;
+            }
+
+            if (string.Equals(segment, "/jubiler", StringComparison.OrdinalIgnoreCase))
+            {
+                AutoJubilerAll();
+                continue;
+            }
+
             if (TryParseMapujCommand(segment, out var mapujArgument))
             {
                 if (mapujArgument is null)
@@ -9450,6 +10075,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _rareCatalogRefreshCoordinator.ObserveText(text);
         _abilityMappingCoordinator.ObserveText(text);
         _artifactTryMappingCoordinator.ObserveText(text);
+        _autoRepairCoordinator.ObserveText(text);
+        _autoGetCoordinator.ObserveText(text);
         CollectSpellKnowledge(text);
         CollectSkillKnowledge(text);
         var toDisplay = _profileSettings.ShowNumericDamageEnabled ? AnnotateDamageLines(text) : text;
@@ -9713,6 +10340,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         Map.SkillKnowledge = new Dictionary<string, int>(_knownSkills, StringComparer.OrdinalIgnoreCase);
+        Killeropedia.SkillKnowledge = new Dictionary<string, int>(_knownSkills, StringComparer.OrdinalIgnoreCase);
         SaveActiveProfile();
     }
 
@@ -9726,7 +10354,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (_bookCatalogRefreshCoordinator.TryCaptureLine(line)
             || _rareCatalogRefreshCoordinator.TryCaptureLine(line)
             || _abilityMappingCoordinator.TryCaptureLine(line)
-            || _artifactTryMappingCoordinator.TryCaptureLine(line))
+            || _artifactTryMappingCoordinator.TryCaptureLine(line)
+            || _autoRepairCoordinator.TryCaptureLine(line)
+            || _autoGetCoordinator.TryCaptureLine(line))
         {
             return;
         }
@@ -9759,6 +10389,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (CombatStatusPolicy.IsDisarmedLine(line))
         {
             Dispatcher.UIThread.Post(TryAutowield);
+        }
+
+        if (AutoGetEnabled && ExperienceGainPolicy.IsExperienceGainLine(line))
+        {
+            // AutoGetAllAsync already re-checks IsConnected/AutoGetEnabled and guards against
+            // overlapping runs (_autoGetRunning) — safe to fire-and-forget here the same way
+            // TryAutostand/TryAutowield above do for their own reactive triggers, just async.
+            Dispatcher.UIThread.Post(() => _ = AutoGetAllAsync());
         }
 
         if (GroupOrdersEnabled
@@ -10247,6 +10885,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // See _lastOutgoingCommandAtUtc's own doc comment — every real send attempt counts as
+        // activity, autowalk's own move commands included, regardless of which of the branches
+        // below actually ends up handling it.
+        _lastOutgoingCommandAtUtc = DateTimeOffset.UtcNow;
+
         // "/recast" is a client-side meta-command (see the matching check in
         // SendCurrentCommandAsync) that expands to "cast <buff> self" per missing buff — the MUD
         // itself has no such command. Any automation that can produce it as a literal string
@@ -10264,6 +10907,29 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (string.Equals(command, "/reconnect", StringComparison.OrdinalIgnoreCase))
         {
             await ReconnectCurrentProfileAsync();
+            return;
+        }
+
+        // "/repair" is the same kind of client-side meta-command as "/recast"/"/reconnect" above
+        // — see RepairAllAsync. Reachable from timers/triggers/aliases via send("/repair") the
+        // same way, not just the command bar.
+        if (string.Equals(command, "/repair", StringComparison.OrdinalIgnoreCase))
+        {
+            await RepairAllAsync();
+            return;
+        }
+
+        // "/autoget" is the same kind of client-side meta-command — see AutoGetAllAsync.
+        if (string.Equals(command, "/autoget", StringComparison.OrdinalIgnoreCase))
+        {
+            await AutoGetAllAsync();
+            return;
+        }
+
+        // "/jubiler" is the same kind of client-side meta-command — see AutoJubilerAll.
+        if (string.Equals(command, "/jubiler", StringComparison.OrdinalIgnoreCase))
+        {
+            AutoJubilerAll();
             return;
         }
 
@@ -10766,7 +11432,24 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 .Select(spell => spell.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             OnPropertyChanged(nameof(MemorizedSpellNames));
+
+            foreach (var buff in BuffSets.SelectMany(set => set.Buffs))
+            {
+                ApplyMemorizationStatus(buff);
+            }
         });
+    }
+
+    /// <summary>Sets <see cref="BuffWatchEntry.IsMemorized"/>/<see cref="BuffWatchEntry.Circle"/>
+    /// from the latest Char.MemSpell data — this reports every known spell slot, not only the
+    /// ones currently memorized, so a spell's circle is known here even while it's unmemorized.</summary>
+    private void ApplyMemorizationStatus(BuffWatchEntry buff)
+    {
+        var normalized = BuffWatchEntry.NormalizeName(buff.Name);
+        var match = _latestMemorizedSpells.FirstOrDefault(spell =>
+            string.Equals(spell.Name, normalized, StringComparison.OrdinalIgnoreCase));
+        buff.IsMemorized = match is { Memed: true };
+        buff.Circle = match?.Circle;
     }
 
     /// <summary>
@@ -11089,6 +11772,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         SwitchProfileCommand.NotifyCanExecuteChanged();
         StartAutoFarmCommand.NotifyCanExecuteChanged();
         StopAutoFarmCommand.NotifyCanExecuteChanged();
+        PauseAutoFarmCommand.NotifyCanExecuteChanged();
+        ResumeAutoFarmCommand.NotifyCanExecuteChanged();
     }
 
     // ========================================================================
@@ -11188,7 +11873,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            _dockLayoutService.Save(_dockFactory.Snapshot(Layout));
+            _dockLayoutService.Save(SnapshotLayoutWithOverlays());
         }
         catch (IOException)
         {

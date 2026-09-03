@@ -1,3 +1,5 @@
+using MudClient.App.Models;
+
 namespace MudClient.App.Docking;
 
 /// <summary>Serializable snapshot of the dock tree, keyed by the stable <see cref="PanelTool"/> ids.</summary>
@@ -14,6 +16,19 @@ public sealed class DockLayoutSnapshot
     /// <summary>Whether this snapshot was taken while <see cref="MudClient.App.Docking.MudDockFactory.IsTransparencyLayout"/>
     /// was active, so restoring it (e.g. on app restart) re-enables pinning panels as overlays.</summary>
     public bool IsTransparencyLayout { get; set; }
+
+    /// <summary>Overlay arrangement (which panels, columns, order, sizes) at the moment this
+    /// snapshot was taken — only meaningful when <see cref="IsTransparencyLayout"/> is true. The
+    /// dock tree itself has no idea overlays exist (see <c>MudDockFactory.Snapshot</c>'s own
+    /// remarks) — the live overlay arrangement actually lives in <c>AppSettings.TerminalOverlays</c>,
+    /// so without a copy here, restoring this snapshot would silently reuse whatever the *current*
+    /// live settings happen to hold instead of what was true when this was saved. Empty in
+    /// snapshots taken before this was tracked, or that were never in TRANSPARENCY mode.</summary>
+    public List<TerminalOverlayEntry> TerminalOverlays { get; set; } = new();
+
+    /// <summary>Shared overlay transparency (see <c>AppSettings.TerminalOverlayOpacity</c>) at the
+    /// moment this snapshot was taken. Null in snapshots saved before this was tracked.</summary>
+    public double? TerminalOverlayOpacity { get; set; }
 }
 
 /// <summary>An auto-hidden (pinned) tool and the tool dock it should snap back to.</summary>

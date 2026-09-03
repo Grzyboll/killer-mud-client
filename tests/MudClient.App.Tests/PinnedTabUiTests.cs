@@ -388,11 +388,12 @@ public sealed class PinnedTabUiTests : IDisposable
         factory.PinToolToEdge(factory.AllTools.First(tool => tool.Id == "Chat"), Alignment.Right);
         factory.PinToolToEdge(factory.AllTools.First(tool => tool.Id == "Automation"), Alignment.Top);
         factory.PinToolToEdge(factory.AllTools.First(tool => tool.Id == "Notes"), Alignment.Bottom);
-        // "Settings" and the 4 promoted Automation sub-panels are also hidden by default in
+        // "Settings" and the 5 promoted Automation sub-panels are also hidden by default in
         // DEFAULT (see CreateLayout). Restore() docks each as a normal tab (unlike
         // RestoreToTopEdge, which pins it and would pollute the pinned-tab assertions below) —
         // just enough to keep the HiddenPanels check honest.
-        foreach (var id in new[] { "Settings", "AutomationTeam", "AutomationTravel", "AutomationCombat", "AutomationFarm" })
+        foreach (var id in new[]
+            { "Settings", "AutomationTeam", "AutomationTravel", "AutomationCombat", "AutomationFarm", "AutomationInventory" })
         {
             factory.Restore(factory.AllTools.First(tool => tool.Id == id));
         }

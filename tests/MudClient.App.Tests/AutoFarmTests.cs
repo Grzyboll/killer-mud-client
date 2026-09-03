@@ -831,4 +831,102 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [AvaloniaFact]
+    public async Task PauseAutoFarmCommand_WhenNotActive_CannotExecute()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            Assert.False(viewModel.PauseAutoFarmCommand.CanExecute(null));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PauseAutoFarm_StopsWalkingButKeepsTheFarmActiveAndItsProgress()
+    {
+        // Regression target: unlike StopAutoFarm, pausing must leave the planned visit order and
+        // the set of already-visited rooms untouched, so resuming continues the same sweep instead
+        // of starting over from the current room.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            ArrangeThreeRoomFarm(viewModel);
+            InvokePrivate(viewModel, "StartAutoFarm");
+            Dispatcher.UIThread.RunJobs();
+
+            var visitOrderBeforePause = GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder");
+            var visitedBeforePause = new HashSet<int>(GetPrivateField<HashSet<int>>(viewModel, "_autoFarmVisitedRoomIds"));
+            Assert.NotNull(GetPrivateField<MapPath?>(viewModel, "_autowalkPath"));
+
+            InvokePrivate(viewModel, "PauseAutoFarm");
+
+            Assert.True(viewModel.IsAutoFarmActive);
+            Assert.True(viewModel.IsAutoFarmPaused);
+            Assert.Null(GetPrivateField<MapPath?>(viewModel, "_autowalkPath"));
+            Assert.Same(visitOrderBeforePause, GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder"));
+            Assert.Equal(visitedBeforePause, GetPrivateField<HashSet<int>>(viewModel, "_autoFarmVisitedRoomIds"));
+            Assert.NotEmpty(viewModel.Map.AutoFarmVisitedRoomIds);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ResumeAutoFarm_ContinuesTheSameSweepInsteadOfReplanningFromScratch()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            ArrangeThreeRoomFarm(viewModel);
+            InvokePrivate(viewModel, "StartAutoFarm");
+            Dispatcher.UIThread.RunJobs();
+            InvokePrivate(viewModel, "PauseAutoFarm");
+            var visitOrderBeforeResume = GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder");
+
+            InvokePrivate(viewModel, "ResumeAutoFarm");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(viewModel.IsAutoFarmPaused);
+            Assert.True(viewModel.IsAutoFarmActive);
+            Assert.Same(visitOrderBeforeResume, GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder"));
+            Assert.NotNull(GetPrivateField<MapPath?>(viewModel, "_autowalkPath"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StopAutoFarm_WhilePaused_ClearsThePausedFlagToo()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            ArrangeThreeRoomFarm(viewModel);
+            InvokePrivate(viewModel, "StartAutoFarm");
+            InvokePrivate(viewModel, "PauseAutoFarm");
+            Assert.True(viewModel.IsAutoFarmPaused);
+
+            InvokePrivate(viewModel, "StopAutoFarm", "test");
+
+            Assert.False(viewModel.IsAutoFarmActive);
+            Assert.False(viewModel.IsAutoFarmPaused);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

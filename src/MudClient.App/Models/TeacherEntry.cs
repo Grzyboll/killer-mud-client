@@ -1,3 +1,5 @@
+using MudClient.App.Services;
+
 namespace MudClient.App.Models;
 
 public sealed record TeacherSkillEntry(
@@ -110,3 +112,26 @@ public sealed record TeacherEntry(
 
     public string OfferingCountText => $"{Skills.Count} umiejętności · {Tricks.Count} trików";
 }
+
+/// <summary>One (teacher, skill) pair — the flat "Umiejętności" sub-tab in Killeropedia's
+/// Nauczyciele view lists one row per skill a teacher offers, instead of grouping by teacher
+/// first, so e.g. "who teaches kick" is a single scan instead of clicking through every
+/// teacher. <see cref="State"/> is baked in (recomputed whenever the search/filter or
+/// <see cref="ViewModels.KilleropediaViewModel.SkillKnowledge"/> changes — see
+/// <c>KilleropediaViewModel.ApplyTeacherFilter</c>) rather than bound live, since Avalonia's
+/// MultiBinding can't target a collection-typed property like <c>TextBlock.TextDecorations</c>,
+/// so the coloring converters take this plain enum instead of (skill, knowledge) directly.</summary>
+public sealed record TeacherSkillRow(TeacherEntry Teacher, TeacherSkillEntry Skill, SkillKnowledgeState State);
+
+/// <summary>One (teacher, trick) pair — the flat "Triki" sub-tab counterpart to
+/// <see cref="TeacherSkillRow"/>. <see cref="IsLearnable"/> mirrors
+/// <see cref="TrickKnowledgeClassifier.MeetsRequirements"/>, baked in the same way and for the
+/// same reason as <see cref="TeacherSkillRow.State"/>.</summary>
+public sealed record TeacherTrickRow(TeacherEntry Teacher, TeacherTrickEntry Trick, bool IsLearnable);
+
+/// <summary>Skill counterpart shown in the "Wg nauczyciela" tab's per-teacher detail pane — same
+/// <see cref="TeacherSkillRow.State"/> idea, minus the teacher (already the whole pane's scope).</summary>
+public sealed record TeacherSkillOffering(TeacherSkillEntry Skill, SkillKnowledgeState State);
+
+/// <summary>Trick counterpart to <see cref="TeacherSkillOffering"/>.</summary>
+public sealed record TeacherTrickOffering(TeacherTrickEntry Trick, bool IsLearnable);

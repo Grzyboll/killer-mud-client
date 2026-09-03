@@ -143,4 +143,58 @@ public sealed class ProfileAutomationSettings
 
     /// <summary>Mob names "kill"ed on sight when <see cref="AutoKillOnRoomEnterEnabled"/> is on.</summary>
     public List<string> AutoKillMobNames { get; set; } = [];
+
+    /// <summary>Arms the "/repair" meta-command (Auto: Ekwipunek) — off by default since it sends
+    /// "remove all" and then re-equips everything, and shouldn't fire just because "/repair" got
+    /// typed by accident (e.g. a mistyped alias).</summary>
+    public bool AutoRepairEnabled { get; set; }
+
+    /// <summary>Arms the "/autoget" meta-command (Auto: Ekwipunek) — off by default, same reasoning
+    /// as <see cref="AutoRepairEnabled"/>.</summary>
+    public bool AutoGetEnabled { get; set; }
+
+    /// <summary>Commands <see cref="AutoGetEnabled"/>'s "/autoget" sends, one per line, verbatim
+    /// and in order — e.g. "get all.klej cia" / "put all.klej {klej}". Defaults to the exact
+    /// looting sequence the feature was modeled on (loot glue/gems/a book off a corpse, examine
+    /// it, then sort the loot into a bag). "{klej}"/"{gem}" are substituted with
+    /// <see cref="AutoLootGlueContainerName"/>/<see cref="AutoLootGemContainerName"/> before
+    /// sending — the same two variables <see cref="AutoJubilerCommandsText"/> uses to take them
+    /// back out, so both only need changing in one place.</summary>
+    public string AutoGetCommandsText { get; set; } =
+        "get all.klej cia\n" +
+        "get all.klej kosc\n" +
+        "get ksiega cia\n" +
+        "get all.gem cia\n" +
+        "exa cia\n" +
+        "put all.klej {klej}\n" +
+        "put all.gem {gem}";
+
+    /// <summary>Container "{klej}" resolves to in <see cref="AutoGetCommandsText"/> and
+    /// <see cref="AutoJubilerCommandsText"/> — where looted "all.klej" gets put, and where
+    /// "/jubiler" later takes it back out from to sell. One shared variable instead of the same
+    /// container name hardcoded into two separate command lists.</summary>
+    public string AutoLootGlueContainerName { get; set; } = "2.tor";
+
+    /// <summary>Container "{gem}" resolves to — see <see cref="AutoLootGlueContainerName"/>.</summary>
+    public string AutoLootGemContainerName { get; set; } = "2.tor";
+
+    /// <summary>Arms the "/jubiler" meta-command (Auto: Ekwipunek) and its automatic trigger on
+    /// entering a room named in <see cref="AutoJubilerRoomNames"/> — off by default, same reasoning
+    /// as <see cref="AutoRepairEnabled"/>.</summary>
+    public bool AutoJubilerEnabled { get; set; }
+
+    /// <summary>Room names that fire "/jubiler" automatically on entry (see
+    /// MainWindowViewModel.TryAutoJubiler) — matched case/diacritics-insensitively, since the room
+    /// name comes from the local map and may or may not carry the diacritics the MUD's own text
+    /// never sends. Defaults to the jeweler/goldsmith shops the feature was modeled on.</summary>
+    public List<string> AutoJubilerRoomNames { get; set; } = ["Jubiler", "Złotnik"];
+
+    /// <summary>Commands "/jubiler" sends, one per line, verbatim and in order — same shape as
+    /// <see cref="AutoGetCommandsText"/>, and sharing its "{klej}"/"{gem}" container
+    /// placeholders.</summary>
+    public string AutoJubilerCommandsText { get; set; } =
+        "rem all.klej {klej}\n" +
+        "sell all.klej\n" +
+        "rem all.gem {gem}\n" +
+        "sell all.gem";
 }

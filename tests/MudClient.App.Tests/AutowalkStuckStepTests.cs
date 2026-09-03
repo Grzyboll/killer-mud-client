@@ -279,6 +279,109 @@ public sealed class AutowalkStuckStepTests
         }
     }
 
+    // ====================================================================
+    // GetRemainingStuckWait — pure timing logic behind MonitorAutowalkStepStuckAsync's wait loop.
+    // Regression target: a trigger firing mid-step (e.g. "cast light" then "wear ...") used to
+    // have no effect on the fixed 8s-from-the-move-command deadline, so a slow-but-legitimate
+    // trigger sequence could still make the exit look "stuck" and get the room wrongly marked
+    // closed on the map. Any outgoing command now pushes the deadline out instead.
+    // ====================================================================
+
+    [Fact]
+    public void GetRemainingStuckWait_NoActivitySinceMonitorStarted_ReturnsFullTimeoutAtStart()
+    {
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        var timeout = TimeSpan.FromSeconds(8);
+
+        var remaining = MainWindowViewModel.GetRemainingStuckWait(
+            monitorStartedAtUtc, monitorStartedAtUtc, DateTimeOffset.MinValue, timeout);
+
+        Assert.Equal(timeout, remaining);
+    }
+
+    [Fact]
+    public void GetRemainingStuckWait_ExactlyAtTimeout_ReturnsZero()
+    {
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        var timeout = TimeSpan.FromSeconds(8);
+
+        var remaining = MainWindowViewModel.GetRemainingStuckWait(
+            monitorStartedAtUtc + timeout, monitorStartedAtUtc, DateTimeOffset.MinValue, timeout);
+
+        Assert.Equal(TimeSpan.Zero, remaining);
+    }
+
+    [Fact]
+    public void GetRemainingStuckWait_PastTimeout_ReturnsZeroNotNegative()
+    {
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        var timeout = TimeSpan.FromSeconds(8);
+
+        var remaining = MainWindowViewModel.GetRemainingStuckWait(
+            monitorStartedAtUtc + TimeSpan.FromSeconds(30), monitorStartedAtUtc, DateTimeOffset.MinValue, timeout);
+
+        Assert.Equal(TimeSpan.Zero, remaining);
+    }
+
+    [Fact]
+    public void GetRemainingStuckWait_StaleLastCommand_DoesNotPullBaselineBeforeMonitorStart()
+    {
+        // _lastOutgoingCommandAtUtc can be old news (e.g. still DateTimeOffset.MinValue, or from
+        // several steps ago) at the instant the monitor's very first check runs — it must never
+        // shorten the wait below a full timeout from when THIS monitor actually started.
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        var timeout = TimeSpan.FromSeconds(8);
+        var staleLastCommand = monitorStartedAtUtc - TimeSpan.FromMinutes(5);
+
+        var remaining = MainWindowViewModel.GetRemainingStuckWait(
+            monitorStartedAtUtc, monitorStartedAtUtc, staleLastCommand, timeout);
+
+        Assert.Equal(timeout, remaining);
+    }
+
+    [Fact]
+    public void GetRemainingStuckWait_ActivityAfterMonitorStarted_PushesTheDeadlineOut()
+    {
+        // This is the actual bug fix: a trigger sending "cast light" / "wear kula" (or anything
+        // else) 5s into an 8s wait must reset the deadline to 8s from THAT command, not let the
+        // original 8s-from-the-move-command window elapse regardless.
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        var timeout = TimeSpan.FromSeconds(8);
+        var lastOutgoingCommandAtUtc = monitorStartedAtUtc + TimeSpan.FromSeconds(5);
+        var now = monitorStartedAtUtc + TimeSpan.FromSeconds(8); // would be "stuck" without the reset
+
+        var remaining = MainWindowViewModel.GetRemainingStuckWait(
+            now, monitorStartedAtUtc, lastOutgoingCommandAtUtc, timeout);
+
+        Assert.Equal(TimeSpan.FromSeconds(5), remaining); // 8s after the 5s-mark, i.e. now+5s
+    }
+
+    [AvaloniaFact]
+    public async Task SendTriggeredCommandAsync_AnyCommand_StampsLastOutgoingCommandTimestamp()
+    {
+        // Proves the other half of the wiring: GetRemainingStuckWait is only useful if
+        // _lastOutgoingCommandAtUtc actually reflects real activity, autowalk's own move commands
+        // included, not just some other trigger's.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var beforeUtc = DateTimeOffset.UtcNow;
+            var method = typeof(MainWindowViewModel).GetMethod(
+                "SendTriggeredCommandAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            await Assert.IsAssignableFrom<Task>(method!.Invoke(viewModel, ["north", CancellationToken.None]));
+
+            var stamped = GetPrivateField<DateTimeOffset>(viewModel, "_lastOutgoingCommandAtUtc");
+            Assert.True(stamped >= beforeUtc);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [AvaloniaFact]
     public async Task HandleAutowalkStepStuck_ExceedsMaxAttemptsDuringAutoFarm_ExcludesRoomAndKeepsFarming()
     {

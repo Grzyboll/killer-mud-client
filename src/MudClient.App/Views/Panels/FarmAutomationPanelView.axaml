@@ -13,11 +13,20 @@
         <StackPanel Spacing="10">
           <TextBlock Classes="mud-faint" TextWrapping="Wrap" Text="{Binding Map.AutoFarmRegionStatusText}" />
           <TextBlock Classes="mud-faint" TextWrapping="Wrap" Text="{Binding AutoFarmStatusText}" />
-          <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+          <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
             <Button Grid.Column="0" Content="Uruchom farmę"
                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding StartAutoFarmCommand}" />
-            <Button Grid.Column="1" Content="Zatrzymaj farmę"
+            <Button Grid.Column="1" Content="Pauza"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    IsVisible="{Binding !IsAutoFarmPaused}"
+                    ToolTip.Tip="Wstrzymaj chodzenie, zachowując dotychczasowy postęp — w przeciwieństwie do „Zatrzymaj farmę” wznowienie nie zacznie trasy od nowa."
+                    Command="{Binding PauseAutoFarmCommand}" />
+            <Button Grid.Column="1" Content="Wznów"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    IsVisible="{Binding IsAutoFarmPaused}"
+                    Command="{Binding ResumeAutoFarmCommand}" />
+            <Button Grid.Column="2" Content="Zatrzymaj farmę"
                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding StopAutoFarmCommand}" />
           </Grid>

@@ -4003,6 +4003,24 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         Assert.Null(exception);
     }
 
+    // ExperienceGainPolicy's own matching logic is covered by ExperienceGainPolicyTests in
+    // MudClient.Core.Tests; the resulting "/autoget" run itself (echoed commands, gating,
+    // random-book pickup) is covered end-to-end in AutoGetMetaCommandTests, which can actually
+    // pump the dispatcher (an AvaloniaFact test class) to observe it — this just proves the
+    // integration point in OnLineReceived doesn't throw, the same way the two tests above do for
+    // their own reactive triggers.
+    [Fact]
+    public void OnLineReceived_ExperienceGainMessage_DoesNotThrow_WithAutoGetEnabled()
+    {
+        SetIsConnected(true);
+        _vm.AutoGetEnabled = true;
+        var method = GetOnLineReceivedMethod();
+
+        var exception = Record.Exception(() => method.Invoke(_vm, ["Zdobyłeś 500 punktów doświadczenia."]));
+
+        Assert.Null(exception);
+    }
+
     [Fact]
     public void OnLineReceived_CommunicationLine_DoesNotThrow()
     {

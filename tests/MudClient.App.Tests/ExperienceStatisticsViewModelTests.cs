@@ -39,6 +39,51 @@ public sealed class ExperienceStatisticsViewModelTests
     }
 
     [Fact]
+    public void CountsDeathsSeparatelyFromLostExperience()
+    {
+        var viewModel = new ExperienceStatisticsViewModel();
+        viewModel.Start(new ExperienceStatisticsData());
+
+        viewModel.Apply([
+            new ExperienceChange(ExperienceChangeKind.Death, 0, null, 31, 900, DateTimeOffset.Now),
+            new ExperienceChange(ExperienceChangeKind.DeathLoss, 50, null, 31, 950, DateTimeOffset.Now),
+        ]);
+
+        Assert.Equal(1, viewModel.DeathCount);
+        Assert.Equal(50, viewModel.DeathLoss);
+    }
+
+    [Fact]
+    public void StrongestHitUsesOnlyOwnDamage()
+    {
+        var viewModel = new ExperienceStatisticsViewModel();
+        viewModel.Start(new ExperienceStatisticsData());
+        var when = DateTimeOffset.Now;
+        viewModel.ApplyCombatDamage(75, "Ghul", "Agron", true, when);
+        viewModel.ApplyCombatDamage(200, "Ghul", "Kultyści", false, when.AddMilliseconds(1));
+
+        Assert.Contains("75", viewModel.StrongestHitDetails);
+        Assert.DoesNotContain("200", viewModel.StrongestHitDetails);
+    }
+
+    [Fact]
+    public void SeparatesExactReceivedHealthFromEstimatedHealingGiven()
+    {
+        var viewModel = new ExperienceStatisticsViewModel();
+        viewModel.Start(new ExperienceStatisticsData());
+        var when = DateTimeOffset.Now;
+        viewModel.ObserveHealthVitals(300, 700, false, false, 31, when);
+        viewModel.ObserveHealthVitals(400, 700, false, false, 31, when.AddMilliseconds(10));
+        viewModel.ObserveHealthLine("Norga wymawia slowa, 'cure serious'.", "Agron", 31, when.AddMilliseconds(20));
+        viewModel.ObserveHealthLine("Twoje cialo wypelnia lecznicze cieplo, kilka twoich ran goi sie.", "Agron", 31, when.AddMilliseconds(30));
+        viewModel.ObserveHealthLine("Wymawiasz slowa, 'cure light'.", "Agron", 31, when.AddSeconds(1));
+        viewModel.ObserveHealthLine("Kilka ran Norgi goi sie.", "Agron", 31, when.AddSeconds(1.1));
+
+        Assert.Equal(100, viewModel.SessionHealthRestored);
+        Assert.Equal(31, viewModel.SessionHealingGiven);
+    }
+
+    [Fact]
     public void BuildsHistoryTotalsRecordsAndTenMostRecentOpponentEntries()
     {
         var startedAt = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.FromHours(2));

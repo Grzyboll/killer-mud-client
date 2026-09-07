@@ -76,6 +76,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string? _statisticsCharacterName;
     private string? _loadedStatisticsCharacterName;
     private ExperienceTracker? _loadedStatisticsTracker;
+    private DateTimeOffset _lastHealthStatisticsSaveAt;
     private readonly CombatSessionCaptureCoordinator _combatCapture;
     private readonly BuffHistoryStore _buffHistoryStore;
     private readonly BuffTrackingEngine _buffTracking = new();
@@ -10321,6 +10322,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         if (ExperienceStatisticsEnabled && _statisticsCharacterName is not null)
         {
+            QueueStatisticsHealthLine(line);
             var statisticsEnemyName = _latestRoomPeople
                 .FirstOrDefault(person => string.Equals(
                     person.Name, _latestCharacterName, StringComparison.OrdinalIgnoreCase))
@@ -10488,6 +10490,60 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (_loadedStatisticsCharacterName is null || !ReferenceEquals(tracker, _loadedStatisticsTracker)) return;
             Statistics.ApplyCombatDamage(amount, enemyName, attackerName, isOwnDamage, when);
         });
+    }
+
+    private void QueueStatisticsHealthLine(string line)
+    {
+        if (_statisticsCharacterName is not { } characterName) return;
+        var tracker = _experienceTracker;
+        var level = _latestCharacterLevel;
+        var when = DateTimeOffset.Now;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_loadedStatisticsCharacterName is null || !ReferenceEquals(tracker, _loadedStatisticsTracker)) return;
+            if (Statistics.ObserveHealthLine(line, characterName, level, when))
+            {
+                SaveHealthStatisticsIfDue(characterName, when);
+            }
+        });
+    }
+
+    private void QueueStatisticsHealthVitals(int hitPoints, int maximumHitPoints, bool inCombat,
+        bool resting, int level)
+    {
+        if (_statisticsCharacterName is not { } characterName) return;
+        var tracker = _experienceTracker;
+        var when = DateTimeOffset.Now;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_loadedStatisticsCharacterName is null || !ReferenceEquals(tracker, _loadedStatisticsTracker)) return;
+            if (Statistics.ObserveHealthVitals(hitPoints, maximumHitPoints, inCombat, resting, level, when))
+            {
+                SaveHealthStatisticsIfDue(characterName, when);
+            }
+        });
+    }
+
+    private void SaveStatistics(string characterName, string area)
+    {
+        try
+        {
+            _experienceStatisticsStore.Save(characterName, Statistics.Data);
+        }
+        catch (Exception exception)
+        {
+            AddToast($"Nie udało się zapisać statystyk {area}: {exception.Message}", "error");
+        }
+    }
+
+    private void SaveHealthStatisticsIfDue(string characterName, DateTimeOffset when)
+    {
+        // Health can change several times per second. Persist in batches so combat does not
+        // repeatedly serialize the growing session file on the UI thread. Character switches
+        // and a normal disconnect still perform the unconditional save above.
+        if (when - _lastHealthStatisticsSaveAt < TimeSpan.FromSeconds(10)) return;
+        _lastHealthStatisticsSaveAt = when;
+        SaveStatistics(characterName, "bilansu HP");
     }
 
     private void ApplyExperienceChanges(IReadOnlyList<ExperienceChange> changes)
@@ -11066,6 +11122,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
         }
         if (update.Position is { } position) UpdateCharacterPosition(position);
+        if (ExperienceStatisticsEnabled && _latestHp is { } health && _latestMaxHp is { } maximumHealth)
+        {
+            var inCombat = AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition) ||
+                           _latestRoomPeople.Any(person => person.IsFighting);
+            var resting = AutowalkRecoveryPolicy.IsRestingPosition(_latestCharacterPosition);
+            QueueStatisticsHealthVitals(health, maximumHealth, inCombat, resting, _latestCharacterLevel);
+        }
         TryAutoAssist();
 
         Dispatcher.UIThread.Post(() =>
@@ -11303,6 +11366,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     : person.Name)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            var tracker = _experienceTracker;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (ReferenceEquals(tracker, _loadedStatisticsTracker))
+                    Statistics.ObserveHealthCombatState(combatOpponents.Length > 0);
+            });
             var resolvedKills = _experienceTracker.ObserveRoomPeople(
                 people.Select(person => person.Name),
                 combatOpponents);

@@ -84,6 +84,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private BuffCharacterKey? _buffCharacter;
     private int _latestCharacterLevel;
     private readonly HashSet<string> _warnedSmartBuffs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _smartBuffSessionCastCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _buffTrackingLock = new();
     private string _smartBuffStatusText = "Oczekiwanie na identyfikację postaci.";
     private string _smartBuffEstimatesText = "Brak zapisanych pomiarów.";
@@ -2106,6 +2107,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         get => _smartBuffEstimatesText;
         private set => SetProperty(ref _smartBuffEstimatesText, value);
     }
+
+    public ObservableCollection<BuffStatisticsSummary> BuffStatistics { get; } = [];
 
     public RelayCommand ClearSmartBuffHistoryCommand { get; }
 
@@ -11799,7 +11802,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             lock (_buffTrackingLock)
             {
-                _buffTracking.ObserveCommand(command, _latestCharacterName, DateTimeOffset.UtcNow);
+                var buffName = _buffTracking.ObserveCommand(
+                    command, _latestCharacterName, DateTimeOffset.UtcNow);
+                if (buffName is not null && _buffHistory is not null)
+                {
+                    _smartBuffSessionCastCounts[buffName] =
+                        _smartBuffSessionCastCounts.GetValueOrDefault(buffName) + 1;
+                    _buffHistory.CastCounts[buffName] =
+                        _buffHistory.CastCounts.GetValueOrDefault(buffName) + 1;
+                    TrySaveBuffHistory();
+                }
             }
         }
         Dispatcher.UIThread.Post(RefreshIdleTime);
@@ -11820,15 +11832,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _buffHistory = _buffHistoryStore.Load(key);
             _buffTracking.SetLevel(_latestCharacterLevel);
             _warnedSmartBuffs.Clear();
+            _smartBuffSessionCastCounts.Clear();
             completeCount = _buffHistory.Measurements.Count(item => item.IsComplete);
             estimatesText = BuildSmartBuffEstimatesText(
-                _buffHistory.Measurements, DateTimeOffset.UtcNow);
+                _buffHistory.Measurements, [], DateTimeOffset.UtcNow);
         }
         ClearSmartBuffHistoryCommand.NotifyCanExecuteChanged();
         Dispatcher.UIThread.Post(() =>
         {
             SmartBuffStatusText = $"{characterName}: {completeCount} poprawnych pomiarów.";
             SmartBuffEstimatesText = estimatesText;
+            UpdateBuffStatistics([], DateTimeOffset.UtcNow);
         });
     }
 
@@ -11903,7 +11917,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 .OfType<BuffPrediction>()
                 .ToList();
             completeCount = _buffHistory.Measurements.Count(item => item.IsComplete);
-            estimatesText = BuildSmartBuffEstimatesText(_buffHistory.Measurements, now);
+            estimatesText = BuildSmartBuffEstimatesText(_buffHistory.Measurements, predictions, now);
             _buffHistory.ActiveCheckpoints = _buffTracking.Checkpoints.ToList();
             if (now - _lastBuffCheckpointSaveUtc >= TimeSpan.FromSeconds(30))
             {
@@ -11916,16 +11930,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             if (cancellationToken.IsCancellationRequested) return;
             SmartBuffEstimatesText = estimatesText;
+            UpdateBuffStatistics(predictions, DateTimeOffset.UtcNow);
             UpdateSmartBuffPanelTimers(predictions);
-            if (predictions.Count == 0)
-            {
-                SmartBuffStatusText = $"Zbieranie danych: {completeCount} poprawnych pomiarów.";
-                return;
-            }
-
-            SmartBuffStatusText = string.Join(" · ", predictions.Select(prediction =>
-                $"{prediction.BuffName}: ~{TimeSpan.FromSeconds(prediction.RemainingSeconds):mm\\:ss} "
-                + $"({ConfidenceText(prediction.Statistics.Confidence)}, n={prediction.Statistics.SampleCount})"));
+            SmartBuffStatusText = $"{_buffCharacter?.CharacterName}: {completeCount} poprawnych pomiarów.";
             foreach (var prediction in predictions.Where(prediction =>
                          prediction.Statistics.Confidence > SmartBuffPanelMinimumConfidence
                          && prediction.RemainingSeconds <= _settings.SmartBuffWarningSeconds
@@ -11981,6 +11988,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private string BuildSmartBuffEstimatesText(
         IEnumerable<BuffMeasurement> measurements,
+        IEnumerable<BuffPrediction> predictions,
         DateTimeOffset now)
     {
         var complete = measurements.Where(item => item.IsComplete).ToList();
@@ -11989,6 +11997,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return "Brak zapisanych pomiarów.";
         }
 
+        var predictionsByName = predictions.ToDictionary(
+            item => item.BuffName, StringComparer.OrdinalIgnoreCase);
         return string.Join(Environment.NewLine, complete
             .GroupBy(item => item.BuffName, StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
@@ -11999,12 +12009,63 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     _settings.SmartBuffMinimumSamples);
                 if (statistics is null)
                 {
-                    return $"{group.Key}: {group.Count()}/{_settings.SmartBuffMinimumSamples} próbek";
+                    return $"{group.Key}: {group.Count()}/{_settings.SmartBuffMinimumSamples} próbek"
+                           + FormatActiveBuffCountdown(group.Key, predictionsByName);
                 }
 
                 return $"{statistics.BuffName}: ~{FormatSmartBuffDuration(statistics.PredictedBudgetSeconds)} "
-                       + $"({ConfidenceText(statistics.Confidence)}, n={statistics.SampleCount})";
+                       + $"({ConfidenceText(statistics.Confidence)}, n={statistics.SampleCount})"
+                       + FormatActiveBuffCountdown(group.Key, predictionsByName);
             }));
+    }
+
+    private static string FormatActiveBuffCountdown(
+        string buffName, IReadOnlyDictionary<string, BuffPrediction> predictions) =>
+        predictions.TryGetValue(buffName, out var prediction)
+            ? $"  •  pozostało ≈{FormatSmartBuffDuration(prediction.RemainingSeconds)}"
+            : string.Empty;
+
+    private void UpdateBuffStatistics(IEnumerable<BuffPrediction> predictions, DateTimeOffset now)
+    {
+        if (_buffHistory is null)
+        {
+            BuffStatistics.Clear();
+            return;
+        }
+
+        var predictionByName = predictions.ToDictionary(
+            item => item.BuffName, StringComparer.OrdinalIgnoreCase);
+        var complete = _buffHistory.Measurements.Where(item => item.IsComplete).ToList();
+        var names = complete.Select(item => item.BuffName)
+            .Concat(_buffHistory.CastCounts.Keys)
+            .Concat(_smartBuffSessionCastCounts.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        BuffStatistics.Clear();
+        foreach (var name in names)
+        {
+            var statistics = _buffEstimator.Calculate(
+                name, complete, _latestCharacterLevel, now, _settings.SmartBuffMinimumSamples);
+            BuffStatistics.Add(new BuffStatisticsSummary
+            {
+                Name = name,
+                Estimate = statistics is null
+                    ? "Za mało próbek"
+                    : $"~{FormatSmartBuffDuration(statistics.PredictedBudgetSeconds)}",
+                Remaining = predictionByName.TryGetValue(name, out var prediction)
+                    ? $"≈{FormatSmartBuffDuration(prediction.RemainingSeconds)}"
+                    : "—",
+                Confidence = statistics is null
+                    ? "—"
+                    : $"{statistics.Confidence:P0} ({ConfidenceText(statistics.Confidence)})",
+                SessionUses = _smartBuffSessionCastCounts.GetValueOrDefault(name),
+                HistoryUses = _buffHistory.CastCounts.GetValueOrDefault(name),
+                SampleCount = complete.Count(item => string.Equals(
+                    item.BuffName, name, StringComparison.OrdinalIgnoreCase)),
+            });
+        }
     }
 
     private static string FormatSmartBuffDuration(double seconds)
@@ -12031,9 +12092,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _buffHistoryStore.Clear(_buffCharacter);
             _buffHistory = new BuffHistoryDocument { Character = _buffCharacter };
             _warnedSmartBuffs.Clear();
+            _smartBuffSessionCastCounts.Clear();
         }
         SmartBuffStatusText = $"Wyczyszczono historię postaci {_buffCharacter.CharacterName}.";
         SmartBuffEstimatesText = "Brak zapisanych pomiarów.";
+        BuffStatistics.Clear();
         AddToast(SmartBuffStatusText, "info");
     }
 
@@ -12049,6 +12112,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         _ = StopCombatCaptureAfterConnectionClosedAsync();
         EndBuffTrackingSession(BuffMeasurementEndReason.SessionEnded);
+        lock (_buffTrackingLock)
+        {
+            _smartBuffSessionCastCounts.Clear();
+        }
         _bookRefreshCts?.Cancel();
         _rareRefreshCts?.Cancel();
         _mapujCts?.Cancel();

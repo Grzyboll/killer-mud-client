@@ -29,9 +29,22 @@ public sealed class BuffHistoryStore
             return NewDocument(character);
         }
 
+        var loadedSchemaVersion = document.SchemaVersion;
         document.Character = character;
         document.Measurements ??= [];
         document.ActiveCheckpoints ??= [];
+        document.CastCounts = new Dictionary<string, int>(
+            document.CastCounts ?? [], StringComparer.OrdinalIgnoreCase);
+        if (loadedSchemaVersion < 2 && document.CastCounts.Count == 0)
+        {
+            // Starsze pliki nie przechowywały liczby komend. Zachowujemy jako
+            // bezpieczne minimum liczbę zarejestrowanych aktywacji buffa.
+            foreach (var group in document.Measurements.GroupBy(
+                         item => item.BuffName, StringComparer.OrdinalIgnoreCase))
+            {
+                document.CastCounts[group.Key] = group.Count();
+            }
+        }
         return document;
     }
 

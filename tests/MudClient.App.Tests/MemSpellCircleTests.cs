@@ -20,7 +20,9 @@ public sealed class MemSpellCircleTests
 
         Assert.Equal("armor", circle.MemedDisplay);
         Assert.Equal("refresh", circle.MemingDisplay);
+        Assert.Equal(1, circle.MemedCount);
         Assert.Equal(2, circle.UnmemedCount);
+        Assert.Equal("1/2", circle.CountDisplay);
         Assert.Equal("fireball ×2", circle.UnmemedDisplay);
         Assert.True(circle.HasUnmemed);
     }

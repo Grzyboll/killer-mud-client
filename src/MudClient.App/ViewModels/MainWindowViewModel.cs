@@ -1992,7 +1992,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Basic (default): each effect shows only its name. Extended: name plus its
-    /// count/duration and description — see EffectsPanelView.</summary>
+    /// count/duration and description in Character Status.</summary>
     public bool ShowExtendedEffects
     {
         get => _profileSettings.ShowExtendedEffects;

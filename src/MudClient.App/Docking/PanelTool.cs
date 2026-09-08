@@ -24,25 +24,22 @@ public sealed class PanelTool : Tool
     /// (real map options vs. the generic placeholder) a settings button shows.</summary>
     public bool IsMapTool => string.Equals(Id, "Map", StringComparison.Ordinal);
 
-    // Retained only while old visual templates remain loadable; no Effects tool is registered.
-    public bool IsEffectsTool => string.Equals(Id, "Effects", StringComparison.Ordinal);
-
     /// <summary>True for the Mem tool specifically — its settings are selected by the stable id,
     /// now that its settings flyout also carries the buff-set management moved in from the former
     /// Buffs tool.</summary>
     public bool IsMemTool => string.Equals(Id, "MemSpells", StringComparison.Ordinal);
 
-    /// <summary>True for the Group tool specifically — same purpose as <see cref="IsEffectsTool"/>;
+    /// <summary>True for the Group tool specifically; its settings flyout carries the group
     /// its settings flyout carries the group spell shortcut editor (label -&gt; spell name, shown as
     /// a button next to each member).</summary>
     public bool IsGroupTool => string.Equals(Id, "Group", StringComparison.Ordinal);
 
-    /// <summary>True for the Chat tool specifically — same purpose as <see cref="IsEffectsTool"/>;
+    /// <summary>True for the Chat tool specifically;
     /// its settings flyout carries the "sound on new message" toggle.</summary>
     public bool IsChatTool => string.Equals(Id, "Chat", StringComparison.Ordinal);
 
     /// <summary>True for the OffensiveActions tool specifically — same purpose as
-    /// <see cref="IsEffectsTool"/>; its settings flyout carries the offensive-action and
+    /// the same stable-id approach; its settings flyout carries the offensive-action and
     /// custom-command shortcut editors.</summary>
     public bool IsOffensiveTool => string.Equals(Id, "OffensiveActions", StringComparison.Ordinal);
 

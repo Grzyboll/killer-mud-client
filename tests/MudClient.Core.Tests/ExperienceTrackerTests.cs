@@ -26,9 +26,10 @@ public sealed class ExperienceTrackerTests
         var tracker = new ExperienceTracker();
         tracker.ProcessLine("<30hp 272 90mv>");
         tracker.ProcessLine("Uciekasz z walki!");
-        tracker.ProcessLine("Tracisz troszke punktow doswiadczenia.");
+        var eventChange = Assert.Single(tracker.ProcessLine("Tracisz troszke punktow doswiadczenia."));
 
         Assert.Empty(tracker.ProcessLine("<30hp 272 89mv>"));
+        Assert.Equal(ExperienceChangeKind.Flee, eventChange.Kind);
     }
 
     [Fact]
@@ -36,9 +37,10 @@ public sealed class ExperienceTrackerTests
     {
         var tracker = new ExperienceTracker();
         tracker.ProcessLine("<1hp 240 90mv>");
-        tracker.ProcessLine("Nie zyjesz, co za pech!!!");
+        var death = Assert.Single(tracker.ProcessLine("Nie zyjesz, co za pech!!!"));
 
         var change = Assert.Single(tracker.ProcessLine("<41hp 300 50mv>"));
+        Assert.Equal(ExperienceChangeKind.Death, death.Kind);
         Assert.Equal(ExperienceChangeKind.DeathLoss, change.Kind);
         Assert.Equal(60, change.Amount);
     }

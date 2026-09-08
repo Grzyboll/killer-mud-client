@@ -343,6 +343,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _loadingBuffSets;
     private bool _loadingShortcutSets;
     private int _buffColumnsCount = 1;
+    private bool _isMemSpellsSectionVisible;
     public ObservableCollection<int> BuffColumnsOptions { get; } = new() { 1, 2, 3 };
 
     // --- Offensive actions / custom commands ---
@@ -1991,7 +1992,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Basic (default): each effect shows only its name. Extended: name plus its
-    /// count/duration and description — see EffectsPanelView.</summary>
+    /// count/duration and description in Character Status.</summary>
     public bool ShowExtendedEffects
     {
         get => _profileSettings.ShowExtendedEffects;
@@ -5972,11 +5973,21 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(BuffsBadge));
         OnPropertyChanged(nameof(BuffsAlert));
+        RefreshOtherEffects();
         UpdateMemToolTitle();
     }
 
+    private void RefreshOtherEffects()
+    {
+        var watched = RequiredBuffs
+            .Select(buff => BuffWatchEntry.NormalizeAffectName(buff.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Replace(OtherEffects, Effects.Where(effect =>
+            !watched.Contains(BuffWatchEntry.NormalizeAffectName(effect.Name))));
+    }
+
     /// <summary>
-    /// Mirrors the buff state onto the Mem dock tab title ("📜 Mem i Buffy 2/3"), so the
+    /// Mirrors the buff state onto the character-status dock tab title, so the
     /// missing-buff signal is visible even when another tab covers the panel.
     /// </summary>
     private void UpdateMemToolTitle()
@@ -5990,8 +6001,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         var setName = SelectedBuffSet?.Name ?? "—";
         tool.Title = RequiredBuffs.Count == 0
-            ? $"📜 Mem i Buffy — {setName}"
-            : $"📜 Mem i Buffy — {setName} {BuffsBadge}";
+            ? $"✨ Stan postaci — {setName}"
+            : $"✨ Stan postaci — {setName} {BuffsBadge}";
     }
 
     private void UpdateGroupToolTitle() => UpdatePanelToolTitle(
@@ -6059,6 +6070,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         get => _buffColumnsCount;
         set => SetProperty(ref _buffColumnsCount, Math.Max(1, Math.Min(3, value)));
+    }
+
+    public bool IsMemSpellsSectionVisible
+    {
+        get => _isMemSpellsSectionVisible;
+        set
+        {
+            if (SetProperty(ref _isMemSpellsSectionVisible, value))
+            {
+                SaveActiveProfile();
+            }
+        }
     }
 
     private void CreateBuffSet()
@@ -6968,6 +6991,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(CanDeleteBuffSet));
 
         BuffColumnsCount = Math.Clamp(profile.BuffColumnsCount, 1, 3);
+        IsMemSpellsSectionVisible = profile.IsMemSpellsSectionVisible;
 
         _loadingShortcutSets = true;
         var legacyGroupSpells = GroupSpells.Select(Clone).ToList();
@@ -7295,6 +7319,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }).ToList(),
             ActiveBuffSetId = SelectedBuffSet?.Id ?? string.Empty,
             BuffColumnsCount = BuffColumnsCount,
+            IsMemSpellsSectionVisible = IsMemSpellsSectionVisible,
             GroupSpellSets = GroupSpellSets.Select(set => new ProfileGroupSpellSet
             {
                 Id = set.Id, Name = set.Name,
@@ -8083,6 +8108,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     // --- Status effects (live, from Char.Affects GMCP) ---
     public ObservableCollection<StatusEffect> Effects { get; } = [];
+
+    /// <summary>Live affects which are not already represented by a configured buff button.</summary>
+    public ObservableCollection<StatusEffect> OtherEffects { get; } = [];
 
     // --- People in room (mock) ---
     public ObservableCollection<PersonEntry> People { get; } = [];

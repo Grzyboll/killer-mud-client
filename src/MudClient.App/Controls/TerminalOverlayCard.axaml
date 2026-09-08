@@ -62,8 +62,8 @@
             </Button.Flyout>
           </Button>
 
-          <!-- Generic per-panel settings placeholder (no behavior yet) — hidden for Map, Effects,
-               Mem, Group, and Chat, which show their real settings menus via the buttons below
+          <!-- Generic per-panel settings placeholder (no behavior yet) — hidden for Map, Mem,
+               Group, and Chat, which show their real settings menus via the buttons below
                instead. -->
           <Button Grid.Column="3" Content="⚙" Padding="3,0" Margin="0,0,3,0" FontSize="10"
                   MinWidth="0" MinHeight="0"
@@ -71,38 +71,12 @@
             <Button.IsVisible>
               <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
                 <Binding Path="!IsMapTool" />
-                <Binding Path="!IsEffectsTool" />
                 <Binding Path="!IsMemTool" />
                 <Binding Path="!IsGroupTool" />
                 <Binding Path="!IsChatTool" />
                 <Binding Path="!IsOffensiveTool" />
               </MultiBinding>
             </Button.IsVisible>
-          </Button>
-
-          <!-- Effects' real settings — shares MainWindowViewModel as Context with most other
-               panels (unlike Map's own dedicated ViewModel), so its flyout binds through a cast
-               instead of a type-keyed DataTemplate. -->
-          <Button Grid.Column="3" Content="⚙" Padding="3,0" Margin="0,0,3,0" FontSize="10"
-                  MinWidth="0" MinHeight="0"
-                  IsVisible="{Binding IsEffectsTool}"
-                  ToolTip.Tip="Ustawienia efektów">
-            <Button.Flyout>
-              <Flyout Placement="BottomEdgeAlignedRight">
-                <!-- Flyout content renders outside this card's own visual tree, so it can't rely
-                     on the app's usual "mud-configurable-widget" descendant styling (see
-                     Docking.axaml) — the shared widget font is applied explicitly here instead. -->
-                <StackPanel Spacing="6" MinWidth="230"
-                            TextElement.FontFamily="{DynamicResource WidgetFontFamilyResource}"
-                            TextElement.FontSize="{DynamicResource WidgetFontSizeResource}"
-                            TextElement.FontWeight="{DynamicResource WidgetFontWeightResource}">
-                  <CheckBox Content="Rozszerzony widok efektów"
-                            IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowExtendedEffects}" />
-                  <TextBlock Classes="mud-faint" TextWrapping="Wrap" MaxWidth="280"
-                             Text="Podstawowy pokazuje nazwę i liczbę, np. „odbicie lustrzane (6)”. Rozszerzony dodaje opis, np. „odbicie lustrzane (6) — Jesteś ukryty pośród swoich odbić.”." />
-                </StackPanel>
-              </Flyout>
-            </Button.Flyout>
           </Button>
 
           <!-- Mem's real settings — buff-set management moved in from the former Buffs tool.
@@ -119,6 +93,8 @@
                             TextElement.FontFamily="{DynamicResource WidgetFontFamilyResource}"
                             TextElement.FontSize="{DynamicResource WidgetFontSizeResource}"
                             TextElement.FontWeight="{DynamicResource WidgetFontWeightResource}">
+                  <CheckBox Content="Rozszerzony widok innych efektów"
+                            IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowExtendedEffects}" />
                   <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
                     <ComboBox ItemsSource="{Binding ((vm:MainWindowViewModel)Context).BuffSets}" SelectedItem="{Binding ((vm:MainWindowViewModel)Context).SelectedBuffSet, Mode=TwoWay}"><ComboBox.ItemTemplate><DataTemplate x:DataType="models:BuffSetEntry"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
                     <Button Grid.Column="1" Content="＋" ToolTip.Tip="Nowy zestaw" Click="CreateBuffSet_OnClick" />

@@ -16,10 +16,10 @@ public sealed class PanelHelpTests
     [Fact]
     public void Catalog_HasOneCompleteTopicForEverySupportedPanel()
     {
-        Assert.Equal(15, PanelHelpCatalog.All.Count);
-        Assert.Equal(15, PanelHelpCatalog.All.Select(topic => topic.PanelId).Distinct().Count());
+        Assert.Equal(14, PanelHelpCatalog.All.Count);
+        Assert.Equal(14, PanelHelpCatalog.All.Select(topic => topic.PanelId).Distinct().Count());
         Assert.Equal([
-                "Terminal", "Effects", "Group", "MemSpells", "OffensiveActions", "Automation",
+                "Terminal", "Group", "MemSpells", "OffensiveActions", "Automation",
                 "AutomationTeam", "AutomationTravel", "AutomationCombat", "AutomationFarm", "Notes",
                 "Gmcp", "Chat", "Settings", "Map"
             ],

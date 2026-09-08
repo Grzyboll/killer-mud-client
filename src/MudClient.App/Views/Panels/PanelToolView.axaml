@@ -36,7 +36,7 @@
     <!-- Placeholder for future per-panel settings (no behavior yet — every panel gets one so the
          spot is consistent once real per-panel options land). Hidden for Terminal (no per-panel
          settings make sense there), for Map (whose own settings button already occupies this same
-         corner — see MapPanelView), and for Effects (real settings button below). -->
+         corner — see MapPanelView). -->
     <Button x:Name="SettingsButton"
             Classes="mud-small"
             Content="⚙"
@@ -49,40 +49,6 @@
             FontSize="{DynamicResource WidgetFontSizeResource}"
             FontWeight="{DynamicResource WidgetFontWeightResource}"
             ToolTip.Tip="Ustawienia panelu (wkrótce)" />
-
-    <!-- Effects' real settings — shares MainWindowViewModel as Context with most other panels
-         (unlike Map's own dedicated ViewModel), so it's special-cased by Id rather than by
-         Context's runtime type. -->
-    <Button x:Name="EffectsSettingsButton"
-            Classes="mud-small"
-            Content="⚙"
-            Padding="6,2"
-            Margin="0,4,4,0"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Top"
-            Opacity="0.75"
-            FontFamily="{DynamicResource WidgetFontFamilyResource}"
-            FontSize="{DynamicResource WidgetFontSizeResource}"
-            FontWeight="{DynamicResource WidgetFontWeightResource}"
-            ToolTip.Tip="Ustawienia efektów">
-      <Button.Flyout>
-        <Flyout Placement="BottomEdgeAlignedRight">
-          <!-- Flyout content renders outside PanelToolView's own visual tree, so it can't rely
-               on the app's usual "mud-configurable-widget" descendant styling (see
-               Docking.axaml) — the shared widget font is applied explicitly here instead, and
-               inherited by the CheckBox/TextBlock below since neither sets its own. -->
-          <StackPanel Spacing="6" MinWidth="230"
-                      TextElement.FontFamily="{DynamicResource WidgetFontFamilyResource}"
-                      TextElement.FontSize="{DynamicResource WidgetFontSizeResource}"
-                      TextElement.FontWeight="{DynamicResource WidgetFontWeightResource}">
-            <CheckBox Content="Rozszerzony widok efektów"
-                      IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowExtendedEffects}" />
-            <TextBlock Classes="mud-faint" TextWrapping="Wrap" MaxWidth="280"
-                       Text="Podstawowy pokazuje nazwę i liczbę, np. „odbicie lustrzane (6)”. Rozszerzony dodaje opis, np. „odbicie lustrzane (6) — Jesteś ukryty pośród swoich odbić.”." />
-          </StackPanel>
-        </Flyout>
-      </Button.Flyout>
-    </Button>
 
     <!-- Mem's real settings — buff-set management moved in from the former Buffs tool. Shares
          MainWindowViewModel as Context like Effects above, so it's special-cased the same way. -->
@@ -108,6 +74,8 @@
                       TextElement.FontFamily="{DynamicResource WidgetFontFamilyResource}"
                       TextElement.FontSize="{DynamicResource WidgetFontSizeResource}"
                       TextElement.FontWeight="{DynamicResource WidgetFontWeightResource}">
+            <CheckBox Content="Rozszerzony widok innych efektów"
+                      IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowExtendedEffects}" />
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
               <ComboBox ItemsSource="{Binding ((vm:MainWindowViewModel)Context).BuffSets}"
                         SelectedItem="{Binding ((vm:MainWindowViewModel)Context).SelectedBuffSet, Mode=TwoWay}">

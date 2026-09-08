@@ -33,7 +33,7 @@ public sealed class DockRestoreTests
     public void CloseAllThenRestoreAll_RightTop()
     {
         var factory = CreateFactory(out var layout);
-        var ids = new[] { "Effects", "Group", "MemSpells" };
+        var ids = new[] { "Group", "MemSpells", "OffensiveActions" };
 
         foreach (var id in ids)
         {
@@ -74,15 +74,28 @@ public sealed class DockRestoreTests
     public void ShowTool_SelectsRequestedTab()
     {
         var factory = CreateFactory(out _);
-        var effects = GetTool(factory, "Effects");
+        var effects = GetTool(factory, "MemSpells");
         var group = GetTool(factory, "Group");
         var owner = Assert.IsType<ToolDock>(effects.Owner);
         factory.SetActiveDockable(group);
 
-        var shown = factory.ShowTool("Effects");
+        var shown = factory.ShowTool("MemSpells");
 
         Assert.True(shown);
         Assert.Same(effects, owner.ActiveDockable);
+    }
+
+    [Fact]
+    public void TryApplySnapshot_IgnoresLegacyEffectsPanel()
+    {
+        var source = CreateFactory(out var sourceLayout);
+        var snapshot = source.Snapshot(sourceLayout);
+        snapshot.HiddenToolIds.Add("Effects");
+
+        var target = CreateFactory(out var targetLayout);
+
+        Assert.True(target.TryApplySnapshot(targetLayout, snapshot));
+        Assert.DoesNotContain(target.AllTools, tool => tool.Id == "Effects");
     }
 
     [Fact]

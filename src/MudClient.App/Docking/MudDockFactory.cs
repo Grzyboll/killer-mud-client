@@ -325,9 +325,8 @@ public sealed class MudDockFactory : Factory, IFactory
     {
         NewTool("Map", "🗺 Mapa", typeof(Views.Panels.MapPanelView), _mapContext);
         NewTool("Terminal", "Terminal", typeof(Views.Panels.TerminalPanelView), _mainContext);
-        NewTool("Effects", "✨ Efekty i Kondycja", typeof(Views.Panels.EffectsPanelView), _mainContext);
         NewTool("Group", "👥 Drużyna", typeof(Views.Panels.GroupPanelView), _mainContext);
-        NewTool("MemSpells", "📜 Mem i Buffy", typeof(Views.Panels.MemSpellsPanelView), _mainContext);
+        NewTool("MemSpells", "✨ Stan postaci", typeof(Views.Panels.MemSpellsPanelView), _mainContext);
         NewTool("OffensiveActions", "⚔ Akcje offensywne i definiowalne", typeof(Views.Panels.OffensiveActionsPanelView), _mainContext);
         NewTool("Automation", "⚙ Automaty", typeof(Views.Panels.AutomationPanelView), _mainContext);
         NewTool("AutomationTeam", "⚙ Auto: Drużyna", typeof(Views.Panels.TeamAutomationPanelView), _mainContext);
@@ -400,7 +399,6 @@ public sealed class MudDockFactory : Factory, IFactory
     {
         CreateAllTools();
         var terminalTool = Tool("Terminal");
-        var effectsTool = Tool("Effects");
         var groupTool = Tool("Group");
         var memSpellsTool = Tool("MemSpells");
         var offensiveActionsTool = Tool("OffensiveActions");
@@ -429,8 +427,8 @@ public sealed class MudDockFactory : Factory, IFactory
         {
             Id = "RightPane",
             Proportion = 0.35,
-            ActiveDockable = effectsTool,
-            VisibleDockables = CreateList<IDockable>(effectsTool, groupTool, memSpellsTool, offensiveActionsTool),
+            ActiveDockable = memSpellsTool,
+            VisibleDockables = CreateList<IDockable>(groupTool, memSpellsTool, offensiveActionsTool),
             Alignment = Alignment.Right,
         };
 
@@ -472,7 +470,6 @@ public sealed class MudDockFactory : Factory, IFactory
         CreateAllTools();
         var mapTool = Tool("Map");
         var terminalTool = Tool("Terminal");
-        var effectsTool = Tool("Effects");
         var groupTool = Tool("Group");
         var memSpellsTool = Tool("MemSpells");
         var offensiveActionsTool = Tool("OffensiveActions");
@@ -511,9 +508,9 @@ public sealed class MudDockFactory : Factory, IFactory
         {
             Id = "RightTopPane",
             Proportion = 0.5,
-            ActiveDockable = effectsTool,
+            ActiveDockable = memSpellsTool,
             VisibleDockables = CreateList<IDockable>(
-                effectsTool, groupTool, memSpellsTool, offensiveActionsTool),
+                groupTool, memSpellsTool, offensiveActionsTool),
             Alignment = Alignment.Right,
         };
 
@@ -1086,6 +1083,12 @@ public sealed class MudDockFactory : Factory, IFactory
         var hidden = new HashSet<string>(snapshot.HiddenToolIds);
         var pinned = new HashSet<string>(snapshot.PinnedTools.Select(p => p.Id));
         var known = AllTools.Select(t => t.Id!).ToHashSet();
+
+        // Effects was merged into the stable MemSpells panel. Old snapshots can still contain
+        // that id in any layout bucket; BuildFromSnapshot omits it, so ignore it for validation.
+        referenced.Remove("Effects");
+        hidden.Remove("Effects");
+        pinned.Remove("Effects");
 
         // Every known tool must appear exactly once across the visible tree, the hidden
         // list, and the pinned list — otherwise the snapshot predates a panel change.

@@ -108,6 +108,8 @@
                       TextElement.FontFamily="{DynamicResource WidgetFontFamilyResource}"
                       TextElement.FontSize="{DynamicResource WidgetFontSizeResource}"
                       TextElement.FontWeight="{DynamicResource WidgetFontWeightResource}">
+            <CheckBox Content="Rozszerzony widok innych efektów"
+                      IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowExtendedEffects}" />
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
               <ComboBox ItemsSource="{Binding ((vm:MainWindowViewModel)Context).BuffSets}"
                         SelectedItem="{Binding ((vm:MainWindowViewModel)Context).SelectedBuffSet, Mode=TwoWay}">

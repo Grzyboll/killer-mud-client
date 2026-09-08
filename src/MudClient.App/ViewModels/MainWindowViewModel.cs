@@ -5968,11 +5968,21 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(BuffsBadge));
         OnPropertyChanged(nameof(BuffsAlert));
+        RefreshOtherEffects();
         UpdateMemToolTitle();
     }
 
+    private void RefreshOtherEffects()
+    {
+        var watched = RequiredBuffs
+            .Select(buff => BuffWatchEntry.NormalizeAffectName(buff.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Replace(OtherEffects, Effects.Where(effect =>
+            !watched.Contains(BuffWatchEntry.NormalizeAffectName(effect.Name))));
+    }
+
     /// <summary>
-    /// Mirrors the buff state onto the Mem dock tab title ("📜 Mem i Buffy 2/3"), so the
+    /// Mirrors the buff state onto the character-status dock tab title, so the
     /// missing-buff signal is visible even when another tab covers the panel.
     /// </summary>
     private void UpdateMemToolTitle()
@@ -5986,8 +5996,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         var setName = SelectedBuffSet?.Name ?? "—";
         tool.Title = RequiredBuffs.Count == 0
-            ? $"📜 Mem i Buffy — {setName}"
-            : $"📜 Mem i Buffy — {setName} {BuffsBadge}";
+            ? $"✨ Stan postaci — {setName}"
+            : $"✨ Stan postaci — {setName} {BuffsBadge}";
     }
 
     private void UpdateGroupToolTitle() => UpdatePanelToolTitle(
@@ -8079,6 +8089,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     // --- Status effects (live, from Char.Affects GMCP) ---
     public ObservableCollection<StatusEffect> Effects { get; } = [];
+
+    /// <summary>Live affects which are not already represented by a configured buff button.</summary>
+    public ObservableCollection<StatusEffect> OtherEffects { get; } = [];
 
     // --- People in room (mock) ---
     public ObservableCollection<PersonEntry> People { get; } = [];

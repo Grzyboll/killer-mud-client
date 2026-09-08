@@ -24,12 +24,10 @@ public sealed class PanelTool : Tool
     /// (real map options vs. the generic placeholder) a settings button shows.</summary>
     public bool IsMapTool => string.Equals(Id, "Map", StringComparison.Ordinal);
 
-    /// <summary>True for the Effects tool specifically — same purpose as <see cref="IsMapTool"/>,
-    /// but Effects shares its Context (MainWindowViewModel) with most other panels, so it can't be
-    /// distinguished by Context's runtime type the way Map's dedicated MapViewModel is.</summary>
+    // Retained only while old visual templates remain loadable; no Effects tool is registered.
     public bool IsEffectsTool => string.Equals(Id, "Effects", StringComparison.Ordinal);
 
-    /// <summary>True for the Mem tool specifically — same purpose as <see cref="IsEffectsTool"/>,
+    /// <summary>True for the Mem tool specifically — its settings are selected by the stable id,
     /// now that its settings flyout also carries the buff-set management moved in from the former
     /// Buffs tool.</summary>
     public bool IsMemTool => string.Equals(Id, "MemSpells", StringComparison.Ordinal);

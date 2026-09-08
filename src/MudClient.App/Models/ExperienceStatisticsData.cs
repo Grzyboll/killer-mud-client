@@ -14,9 +14,37 @@ public sealed class ExperienceSessionData
     public DateTimeOffset LastUpdatedAt { get; set; } = DateTimeOffset.Now;
     public List<ExperienceChangeData> Changes { get; set; } = [];
     public List<CombatEncounterData> CombatEncounters { get; set; } = [];
+    public List<HealthEventData> HealthEvents { get; set; } = [];
 
     // Kept only to migrate statistics files written before combat hits were compacted.
     public List<CombatDamageData> CombatDamage { get; set; } = [];
+}
+
+public enum HealthEventKind
+{
+    DamageAttack,
+    DamageSpell,
+    DamagePeriodic,
+    DamageOther,
+    HealingSelf,
+    HealingReceived,
+    HealingGiven,
+    HealingPeriodic,
+    HealingRest,
+    HealingOther,
+}
+
+public sealed class HealthEventData
+{
+    public HealthEventKind Kind { get; set; }
+    public int Amount { get; set; }
+    public string? Source { get; set; }
+    public string? Ability { get; set; }
+    public string? Target { get; set; }
+    public bool IsEstimated { get; set; }
+    public int CharacterLevel { get; set; }
+    public string? CombatId { get; set; }
+    public DateTimeOffset When { get; set; }
 }
 
 public sealed class CombatEncounterData
@@ -28,6 +56,8 @@ public sealed class CombatEncounterData
     public int StrongestHit { get; set; }
     public string? StrongestHitAttackerName { get; set; }
     public DateTimeOffset StrongestHitWhen { get; set; }
+    // Missing/false in older files means that the old value may belong to another group member.
+    public bool StrongestHitIsOwn { get; set; }
 }
 
 public sealed class CombatDamageData

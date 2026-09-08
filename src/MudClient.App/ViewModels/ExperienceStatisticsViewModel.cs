@@ -19,6 +19,8 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
     [ObservableProperty] private long _lostExperience;
     [ObservableProperty] private long _fleeLoss;
     [ObservableProperty] private long _deathLoss;
+    [ObservableProperty] private int _fleeCount;
+    [ObservableProperty] private int _deathCount;
     [ObservableProperty] private long _ownCombatDamage;
     [ObservableProperty] private long _groupCombatDamage;
     [ObservableProperty] private int _killCount;
@@ -30,6 +32,7 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
     public TimeSpan SessionDuration => DateTimeOffset.Now - _session.StartedAt;
     public string SessionDurationText => FormatDuration(SessionDuration);
     public string DamageAndKillExperienceText => $"{DamageExperience:N0} / {KillExperience:N0}";
+    public string FleeAndDeathCountText => $"{FleeCount:N0} / {DeathCount:N0}";
     public string FleeAndDeathLossText => $"{FleeLoss:N0} / {DeathLoss:N0}";
     public string KillsAndAverageText => $"{KillCount:N0} / {AveragePerKill:N0}";
     public string OwnAndGroupDamageText => $"{OwnCombatDamage:N0} / {GroupCombatDamage:N0}";
@@ -45,8 +48,9 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
     {
         get
         {
-            var encounter = AllCombatEncounters.MaxBy(item => item.StrongestHit);
-            var pending = _pendingCombatDamage.MaxBy(item => item.Amount);
+            var encounter = AllCombatEncounters.Where(item => item.StrongestHitIsOwn)
+                .MaxBy(item => item.StrongestHit);
+            var pending = _pendingCombatDamage.Where(item => item.IsOwnDamage).MaxBy(item => item.Amount);
             if (pending is not null && (encounter is null || pending.Amount > encounter.StrongestHit))
             {
                 return $"~{pending.Amount:N0} — {DisplayEnemy(pending.EnemyName)}, {pending.When:g}";
@@ -76,6 +80,7 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
         _session = new ExperienceSessionData();
         _pendingCombatDamage.Clear();
         _data.Sessions.Add(_session);
+        ResetHealthRuntime();
         Refresh();
     }
 
@@ -131,6 +136,8 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
         GainedExperience = gains.Sum(change => change.Amount);
         FleeLoss = losses.Where(change => change.Kind == ExperienceChangeKind.FleeLoss).Sum(change => change.Amount);
         DeathLoss = losses.Where(change => change.Kind == ExperienceChangeKind.DeathLoss).Sum(change => change.Amount);
+        FleeCount = _session.Changes.Count(change => change.Kind == ExperienceChangeKind.Flee);
+        DeathCount = _session.Changes.Count(change => change.Kind == ExperienceChangeKind.Death);
         LostExperience = losses.Sum(change => change.Amount);
         RefreshCombatDamageTotals();
         var kills = gains.Where(change => change.Kind == ExperienceChangeKind.KillReward).ToList();
@@ -173,16 +180,17 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
             return;
         }
 
-        var strongest = hits.MaxBy(hit => hit.Amount)!;
+        var strongest = hits.Where(hit => hit.IsOwnDamage).MaxBy(hit => hit.Amount);
         _session.CombatEncounters.Add(new CombatEncounterData
         {
             EnemyName = change.EnemyName,
             When = change.When,
             OwnDamage = hits.Where(hit => hit.IsOwnDamage).Sum(hit => (long)hit.Amount),
             GroupDamage = hits.Sum(hit => (long)hit.Amount),
-            StrongestHit = strongest.Amount,
-            StrongestHitAttackerName = strongest.AttackerName,
-            StrongestHitWhen = strongest.When,
+            StrongestHit = strongest?.Amount ?? 0,
+            StrongestHitAttackerName = strongest?.AttackerName,
+            StrongestHitWhen = strongest?.When ?? default,
+            StrongestHitIsOwn = strongest is not null,
         });
         _pendingCombatDamage.RemoveAll(hits.Contains);
     }
@@ -204,7 +212,7 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
                          .GroupBy(hit => hit.EncounterWhen!.Value))
             {
                 var hits = group.ToList();
-                var strongest = hits.MaxBy(hit => hit.Amount)!;
+                var strongest = hits.Where(hit => hit.IsOwnDamage).MaxBy(hit => hit.Amount);
                 session.CombatEncounters.Add(new CombatEncounterData
                 {
                     EnemyName = hits.Select(hit => hit.EnemyName)
@@ -212,9 +220,10 @@ public sealed partial class ExperienceStatisticsViewModel : ObservableObject
                     When = group.Key,
                     OwnDamage = hits.Where(hit => hit.IsOwnDamage).Sum(hit => (long)hit.Amount),
                     GroupDamage = hits.Sum(hit => (long)hit.Amount),
-                    StrongestHit = strongest.Amount,
-                    StrongestHitAttackerName = strongest.AttackerName,
-                    StrongestHitWhen = strongest.When,
+                    StrongestHit = strongest?.Amount ?? 0,
+                    StrongestHitAttackerName = strongest?.AttackerName,
+                    StrongestHitWhen = strongest?.When ?? default,
+                    StrongestHitIsOwn = strongest is not null,
                 });
             }
             session.CombatDamage.Clear();

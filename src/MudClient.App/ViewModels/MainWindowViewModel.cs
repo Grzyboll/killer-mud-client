@@ -11802,15 +11802,20 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             lock (_buffTrackingLock)
             {
+                var now = DateTimeOffset.UtcNow;
                 var buffName = _buffTracking.ObserveCommand(
-                    command, _latestCharacterName, DateTimeOffset.UtcNow);
+                    command, _latestCharacterName, now);
                 if (buffName is not null && _buffHistory is not null)
                 {
                     _smartBuffSessionCastCounts[buffName] =
                         _smartBuffSessionCastCounts.GetValueOrDefault(buffName) + 1;
                     _buffHistory.CastCounts[buffName] =
                         _buffHistory.CastCounts.GetValueOrDefault(buffName) + 1;
-                    TrySaveBuffHistory();
+
+                    if (now - _lastBuffCheckpointSaveUtc >= TimeSpan.FromSeconds(30))
+                    {
+                        TrySaveBuffHistory();
+                    }
                 }
             }
         }
@@ -12027,18 +12032,32 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void UpdateBuffStatistics(IEnumerable<BuffPrediction> predictions, DateTimeOffset now)
     {
-        if (_buffHistory is null)
+        List<BuffMeasurement> complete;
+        Dictionary<string, int> historyUses;
+        Dictionary<string, int> sessionUses;
+
+        lock (_buffTrackingLock)
         {
-            BuffStatistics.Clear();
-            return;
+            if (_buffHistory is null)
+            {
+                BuffStatistics.Clear();
+                return;
+            }
+
+            complete = _buffHistory.Measurements.Where(item => item.IsComplete).ToList();
+            historyUses = new Dictionary<string, int>(
+                _buffHistory.CastCounts,
+                StringComparer.OrdinalIgnoreCase);
+            sessionUses = new Dictionary<string, int>(
+                _smartBuffSessionCastCounts,
+                StringComparer.OrdinalIgnoreCase);
         }
 
         var predictionByName = predictions.ToDictionary(
             item => item.BuffName, StringComparer.OrdinalIgnoreCase);
-        var complete = _buffHistory.Measurements.Where(item => item.IsComplete).ToList();
         var names = complete.Select(item => item.BuffName)
-            .Concat(_buffHistory.CastCounts.Keys)
-            .Concat(_smartBuffSessionCastCounts.Keys)
+            .Concat(historyUses.Keys)
+            .Concat(sessionUses.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -12060,8 +12079,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 Confidence = statistics is null
                     ? "—"
                     : $"{statistics.Confidence:P0} ({ConfidenceText(statistics.Confidence)})",
-                SessionUses = _smartBuffSessionCastCounts.GetValueOrDefault(name),
-                HistoryUses = _buffHistory.CastCounts.GetValueOrDefault(name),
+                SessionUses = sessionUses.GetValueOrDefault(name),
+                HistoryUses = historyUses.GetValueOrDefault(name),
                 SampleCount = complete.Count(item => string.Equals(
                     item.BuffName, name, StringComparison.OrdinalIgnoreCase)),
             });

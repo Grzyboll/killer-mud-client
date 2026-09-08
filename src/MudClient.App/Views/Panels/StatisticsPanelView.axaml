@@ -110,6 +110,27 @@
         <TextBlock Classes="mud-faint" Text="{Binding Statistics.TotalKills, StringFormat=Zabicia: {0:N0}}"/>
       </StackPanel></Border></Grid>
     </TabItem>
+    <TabItem Header="Buffy">
+      <ScrollViewer>
+        <ItemsControl Margin="8" ItemsSource="{Binding BuffStatistics}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BuffStatisticsSummary">
+              <Border Classes="mud-section" Margin="0,2" Padding="8">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Remaining}"/>
+                  <TextBlock Grid.Row="1" Classes="mud-faint" Text="{Binding Estimate, StringFormat=Estymowany czas: {0}}"/>
+                  <TextBlock Grid.Row="1" Grid.Column="1" Classes="mud-faint" Text="{Binding Confidence, StringFormat=Pewność: {0}}"/>
+                  <TextBlock Grid.Row="2" Classes="mud-faint" Text="{Binding SessionUses, StringFormat=Użycia w sesji: {0}}"/>
+                  <TextBlock Grid.Row="2" Grid.Column="1" Classes="mud-faint" Text="{Binding HistoryUses, StringFormat=Użycia w historii: {0}}"/>
+                  <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Classes="mud-faint" Text="{Binding SampleCount, StringFormat=Poprawne pomiary: {0}}"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </TabItem>
     <TabItem Header="Rekordy"><ScrollViewer><StackPanel Margin="12" Spacing="8">
       <TextBlock Text="{Binding Statistics.BestExperiencePerHour, StringFormat=Najlepszy EXP/h: {0:N0}}"/>
       <TextBlock Text="{Binding Statistics.LargestKillDetails, StringFormat=Największa nagroda: {0}}" TextWrapping="Wrap"/>

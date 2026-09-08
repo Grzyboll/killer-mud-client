@@ -65,6 +65,9 @@ public sealed class ProfileData
     /// <summary>Number of buff columns to display (1, 2, or 3).</summary>
     public int BuffColumnsCount { get; set; } = 1;
 
+    /// <summary>Whether the memorized-spells section of Character Status is expanded.</summary>
+    public bool IsMemSpellsSectionVisible { get; set; }
+
     /// <summary>Named, per-profile collections of group spell shortcuts.</summary>
     public List<ProfileGroupSpellSet> GroupSpellSets { get; set; } = [];
 

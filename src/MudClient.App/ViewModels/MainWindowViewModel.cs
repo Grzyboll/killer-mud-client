@@ -341,6 +341,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _loadingBuffSets;
     private bool _loadingShortcutSets;
     private int _buffColumnsCount = 1;
+    private bool _isMemSpellsSectionVisible;
     public ObservableCollection<int> BuffColumnsOptions { get; } = new() { 1, 2, 3 };
 
     // --- Offensive actions / custom commands ---
@@ -6067,6 +6068,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         set => SetProperty(ref _buffColumnsCount, Math.Max(1, Math.Min(3, value)));
     }
 
+    public bool IsMemSpellsSectionVisible
+    {
+        get => _isMemSpellsSectionVisible;
+        set
+        {
+            if (SetProperty(ref _isMemSpellsSectionVisible, value))
+            {
+                SaveActiveProfile();
+            }
+        }
+    }
+
     private void CreateBuffSet()
     {
         var name = NewBuffSetName.Trim();
@@ -6974,6 +6987,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(CanDeleteBuffSet));
 
         BuffColumnsCount = Math.Clamp(profile.BuffColumnsCount, 1, 3);
+        IsMemSpellsSectionVisible = profile.IsMemSpellsSectionVisible;
 
         _loadingShortcutSets = true;
         var legacyGroupSpells = GroupSpells.Select(Clone).ToList();
@@ -7301,6 +7315,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }).ToList(),
             ActiveBuffSetId = SelectedBuffSet?.Id ?? string.Empty,
             BuffColumnsCount = BuffColumnsCount,
+            IsMemSpellsSectionVisible = IsMemSpellsSectionVisible,
             GroupSpellSets = GroupSpellSets.Select(set => new ProfileGroupSpellSet
             {
                 Id = set.Id, Name = set.Name,

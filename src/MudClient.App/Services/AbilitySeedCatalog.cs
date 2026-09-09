@@ -18,18 +18,17 @@ public sealed record ClassAbilitySeed(
 /// obtainable" the user asked for. Source: the user's own in-game "skills"/"spells" listings
 /// pasted directly (Polish diacritics were mojibake'd in the paste and reconstructed by hand, the
 /// same way the Killeropedia tricks wiki page was earlier). Seeded so far: Paladyn, Czarny
-/// Rycerz, Złodziej, Druid, Nomad, Kleryk, Wojownik, Barbarzyńca, Mag, Odrzucanie — more
-/// classes/schools are added the same way as they're supplied.
+/// Rycerz, Złodziej, Druid, Nomad, Kleryk, Wojownik, Barbarzyńca, Mag and the supplied Mag
+/// schools — more classes/schools are added the same way as they're supplied.
 ///
 /// A Mag's Wędrowiec-visible spell schools (Przemiany, Nekromancja, Przywołania, Odrzucanie,
-/// Zauroczenie, Inwokacje, Poznanie — see <c>AbilitySkillTreeCanvas.BranchColors</c>) are each
+/// Zauroczenie, Inwokacje, Poznanie and Iluzje — see <c>AbilitySkillTreeCanvas.BranchColors</c>) are each
 /// their own separately pickable Wędrowiec specialization in-game, not sub-categories of one
 /// "Mag" specialization — so each school gets its own <see cref="ClassAbilitySeed"/> entry here
 /// (named exactly after the school, since in-game the specialization name IS the school name),
 /// holding only the spells that specialization adds on top of a plain Mag's general spellbook.
 /// "Mag" itself keeps only its shared skills for now; its own general/unspecialized spell list
-/// hasn't been supplied yet, so <c>MagSpells</c> stays empty rather than guessed at. Only
-/// "Odrzucanie" has a supplied spell list so far — the rest arrive as separate supplied lists.
+/// hasn't been supplied yet, so <c>MagSpells</c> stays empty rather than guessed at.
 ///
 /// This only carries what the class's own listing already states (name, level/circle gate, the
 /// raw [P]/[T]/[A] tags — kept exactly as given, including apparent oddities like Druid listing
@@ -836,6 +835,160 @@ public static class AbilitySeedCatalog
         new("resist weapon", Odrzucanie, 9),
     ];
 
+    // ========================================================================
+    // Przemiany (Transmutation) — one of Mag's separately pickable Wędrowiec
+    // specializations. Spell names and circles come from the in-game list
+    // supplied by the user for /mapuj; preserve every name verbatim because it
+    // is sent directly as "help <name>".
+    // ========================================================================
+
+    private const string Przemiany = "Przemiany";
+
+    private static readonly IReadOnlyList<SpellSeedEntry> PrzemianySpells =
+    [
+        // Krąg 1
+        new("acid hands", Przemiany, 1), new("alarm", Przemiany, 1), new("armor", Przemiany, 1),
+        new("blur", Przemiany, 1), new("comprehend languages", Przemiany, 1),
+        new("detect aggressive", Przemiany, 1), new("detect magic", Przemiany, 1),
+        new("detect undead", Przemiany, 1), new("fire darts", Przemiany, 1),
+        new("infravision", Przemiany, 1), new("light", Przemiany, 1), new("magic missile", Przemiany, 1),
+        new("mind strike", Przemiany, 1), new("misfortune", Przemiany, 1), new("shield", Przemiany, 1),
+        new("slow rot", Przemiany, 1), new("transmute liquid", Przemiany, 1),
+
+        // Krąg 2
+        new("bear endurance", Przemiany, 2), new("bladethirst", Przemiany, 2),
+        new("bull strength", Przemiany, 2), new("burning hands", Przemiany, 2),
+        new("cat grace", Przemiany, 2), new("change sex", Przemiany, 2), new("cold snap", Przemiany, 2),
+        new("colour spray", Przemiany, 2), new("continual light", Przemiany, 2),
+        new("darkvision", Przemiany, 2), new("deafness", Przemiany, 2), new("detect invis", Przemiany, 2),
+        new("eagle splendor", Przemiany, 2), new("energize", Przemiany, 2), new("faerie fire", Przemiany, 2),
+        new("fox cunning", Przemiany, 2), new("frost hands", Przemiany, 2), new("identify", Przemiany, 2),
+        new("invisibility", Przemiany, 2), new("mirror image", Przemiany, 2), new("purify food", Przemiany, 2),
+        new("ray of enfeeblement", Przemiany, 2), new("shocking grasp", Przemiany, 2),
+        new("silence", Przemiany, 2), new("sleep", Przemiany, 2), new("strength", Przemiany, 2),
+
+        // Krąg 3
+        new("animate staff", Przemiany, 3), new("cautious sleep", Przemiany, 3),
+        new("faerie fog", Przemiany, 3), new("farsight", Przemiany, 3), new("fireproof", Przemiany, 3),
+        new("flame arrow", Przemiany, 3), new("float", Przemiany, 3), new("haste", Przemiany, 3),
+        new("lightning bolt", Przemiany, 3), new("maze", Przemiany, 3), new("piercing sight", Przemiany, 3),
+        new("share fitness", Przemiany, 3), new("slow", Przemiany, 3), new("wall of mist", Przemiany, 3),
+        new("water breathing", Przemiany, 3), new("waterwalk", Przemiany, 3), new("web", Przemiany, 3),
+
+        // Krąg 4
+        new("acid blast", Przemiany, 4), new("darkness", Przemiany, 4), new("detect hidden", Przemiany, 4),
+        new("floating disc", Przemiany, 4), new("hardiness", Przemiany, 4), new("hold person", Przemiany, 4),
+        new("lower resistance", Przemiany, 4), new("might", Przemiany, 4), new("mind blast", Przemiany, 4),
+        new("razorblade hands", Przemiany, 4),
+
+        // Krąg 5
+        new("chaotic shock", Przemiany, 5), new("charm person", Przemiany, 5),
+        new("confusion", Przemiany, 5), new("dimension door", Przemiany, 5), new("fireshield", Przemiany, 5),
+        new("force bolt", Przemiany, 5), new("hold animal", Przemiany, 5), new("hold undead", Przemiany, 5),
+        new("iceshield", Przemiany, 5), new("mend", Przemiany, 5),
+
+        // Krąg 6
+        new("chain lightning", Przemiany, 6), new("charm monster", Przemiany, 6),
+        new("feeblemind", Przemiany, 6), new("fireball", Przemiany, 6), new("fly", Przemiany, 6),
+        new("hold monster", Przemiany, 6), new("hold plant", Przemiany, 6), new("light nova", Przemiany, 6),
+        new("locate object", Przemiany, 6), new("shadow weapon", Przemiany, 6), new("stone skin", Przemiany, 6),
+        new("summon", Przemiany, 6),
+
+        // Krąg 7
+        new("astral journey", Przemiany, 7), new("change staff", Przemiany, 7),
+        new("cone of cold", Przemiany, 7), new("eye of vision", Przemiany, 7),
+        new("major haste", Przemiany, 7), new("mass fly", Przemiany, 7), new("mend golem", Przemiany, 7),
+        new("pass door", Przemiany, 7), new("portal", Przemiany, 7), new("power word stun", Przemiany, 7),
+
+        // Krąg 8
+        new("behemot toughness", Przemiany, 8), new("draconic wisdom", Przemiany, 8),
+        new("enchant armor", Przemiany, 8), new("enchant weapon", Przemiany, 8),
+        new("eyes of the torturer", Przemiany, 8), new("giant strength", Przemiany, 8),
+        new("insight", Przemiany, 8), new("lightingshield", Przemiany, 8), new("nimbleness", Przemiany, 8),
+        new("power word blind", Przemiany, 8), new("recharge", Przemiany, 8), new("slippery floor", Przemiany, 8),
+
+        // Krąg 9
+        new("group unity", Przemiany, 9), new("master of piercing sight", Przemiany, 9),
+        new("nexus", Przemiany, 9), new("power word kill", Przemiany, 9), new("sense presence", Przemiany, 9),
+        new("wizard eye", Przemiany, 9),
+    ];
+
+    private static IReadOnlyList<SpellSeedEntry> SchoolSpells(string school, params (int Circle, string Names)[] circles) =>
+        circles.SelectMany(circle => circle.Names.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(name => new SpellSeedEntry(name, school, circle.Circle))).ToArray();
+
+    private const string Przywolania = "Przywołania";
+    private static readonly IReadOnlyList<SpellSeedEntry> PrzywolaniaSpells = SchoolSpells(Przywolania,
+        (1, "acid hands|armor|blur|bonelace|dismiss animal|dismiss insect|dismiss plant|fire darts|infravision|light|mind strike|slow rot|summon insect"),
+        (2, "bear endurance|bladethirst|bull strength|burning hands|cat grace|change sex|chill touch|colour spray|continual light|deafness|dismiss person|eagle splendor|endure acid|endure cold|endure fire|endure lightning|energize|faerie fire|fox cunning|frost hands|invisibility|mirror image|purify food|ray of enfeeblement|silence|sleep|strength|weaken"),
+        (3, "dismiss monster|dismiss outsider|dispel magic|faerie fog|fireproof|flame arrow|float|haste|healing sleep|increase wounds|maze|slow|summon greenskin|water breathing|waterwalk"),
+        (4, "animate dead|darkness|dismiss undead|ethereal armor|free action|hold person|mind blast|remove paralysis|vampiric touch"),
+        (5, "charm person|confusion|dimension door|hold animal|hold undead|mend|minor globe of invulnerability|raise zombie|resist acid|resist cold|resist fire|resist lightning|resist normal weapon|summon flying creature|summon lesser meteor"),
+        (6, "charm monster|feeblemind|hold monster|hold plant|reflect spell I|resist elements|shadow weapon|stone skin|summon|fly"),
+        (7, "energy shield|globe of invulnerability|pass door|portal|power word stun|reflect spell II|summon strong creature"),
+        (8, "enchant armor|enchant weapon|energy drain|power word blind|recharge|resist magic weapon|summon greater meteor"),
+        (9, "nexus|power word kill|summon ancient creature"));
+
+    private const string Poznanie = "Poznanie";
+    private static readonly IReadOnlyList<SpellSeedEntry> PoznanieSpells = SchoolSpells(Poznanie,
+        (1, "light|detect magic|infravision|magic missile|shield|blur|acid hands|comprehend languages|slow rot|misfortune|transmute liquid|dismiss animal|detect aggressive|dismiss insect|detect undead|alarm|lore undead|bonelace|dismiss plant|mind strike"),
+        (2, "purify food|burning hands|change sex|chill touch|colour spray|continual light|detect invis|faerie fire|identify|invisibility|shocking grasp|sleep|mirror image|weaken|silence|strength|deafness|bladethirst|frost hands|cold snap|energize|ray of enfeeblement|darkvision|endure fire|endure cold|endure acid|endure lightning|dismiss person|bull strength|cat grace|fox cunning|bear endurance|eagle splendor"),
+        (3, "dispel magic|faerie fog|farsight|fireproof|float|haste|lightning bolt|slow|waterwalk|water breathing|web|healing sleep|increase wounds|animate staff|dismiss monster|maze|piercing sight|wall of mist|cautious sleep|share fitness|dismiss outsider"),
+        (4, "acid blast|detect hidden|floating disc|hold person|free action|remove paralysis|darkness|ethereal armor|vampiric touch|might|lower resistance|razorblade hands|dismiss undead|hardiness|mind blast"),
+        (5, "charm person|confusion|hold animal|resist fire|resist cold|resist lightning|force bolt|mend|hold undead|resist acid|resist normal weapon|fireshield|iceshield|minor globe of invulnerability|dimension door|chaotic shock"),
+        (6, "chain lightning|fireball|locate object|stone skin|hold monster|hold plant|resist elements|reflect spell I|charm monster|feeblemind|fly|light nova"),
+        (7, "pass door|change staff|energy shield|reflect spell II|cone of cold|globe of invulnerability|power word stun|major haste|mass fly|eye of vision|astral journey|mend golem"),
+        (8, "enchant armor|enchant weapon|energy drain|giant strength|recharge|resist magic weapon|power word blind|eyes of the torturer|psionic blast|slippery floor|nimbleness|draconic wisdom|insight|behemot toughness|lightingshield"),
+        (9, "power word kill|wizard eye|group unity|sense presence|master of piercing sight"));
+
+    private const string Zauroczenie = "Zauroczenie";
+    private static readonly IReadOnlyList<SpellSeedEntry> ZauroczenieSpells = SchoolSpells(Zauroczenie,
+        (1, "acid hands|armor|blur|comprehend languages|confuse languages|detect magic|dismiss animal|dismiss insect|dismiss plant|fire darts|infravision|light|magic hands|mind strike|slow rot"),
+        (2, "bear endurance|bladethirst|bull strength|burning hands|cat grace|change sex|colour spray|continual light|darkvision|daze|deafness|detect invis|dismiss person|eagle splendor|endure acid|endure cold|endure fire|endure lightning|energize|faerie fire|fox cunning|frost hands|identify|invisibility|mirror image|noble look|purify food|ray of enfeeblement|silence|sleep|strength"),
+        (3, "dismiss monster|dismiss outsider|dispel magic|faerie fog|farsight|fireproof|flame arrow|float|haste|maze|slow|water breathing|waterwalk"),
+        (4, "darkness|detect hidden|dismiss undead|free action|hold person|imbue with element|mind blast|remove paralysis"),
+        (5, "charm person|confusion|dimension door|hold animal|hold undead|mend|minor globe of invulnerability|quiet step|resist acid|resist cold|resist fire|resist lightning|resist normal weapon"),
+        (6, "charm monster|feeblemind|fly|hold monster|hold plant|locate object|puppet master|reflect spell I|resist elements|shadow weapon|stone skin|summon"),
+        (7, "domination|energy shield|globe of invulnerability|loyalty|pass door|portal|power word stun|reflect spell II"),
+        (8, "enchant armor|enchant weapon|inspiring presence|power word blind|recharge|resist magic weapon"),
+        (9, "enchant artefact|nexus|power word kill"));
+
+    private const string Iluzje = "Iluzje";
+    private static readonly IReadOnlyList<SpellSeedEntry> IluzjeSpells = SchoolSpells(Iluzje,
+        (1, "acid hands|armor|blur|comprehend languages|dazzling flash|detect magic|fire darts|infravision|light|mind strike|slow rot"),
+        (2, "bear endurance|bladethirst|bull strength|burning hands|cat grace|change sex|colour spray|continual light|darkvision|deafness|detect invis|eagle splendor|energize|faerie fire|fox cunning|frost hands|identify|invisibility|mirror image|purify food|ray of enfeeblement|silence|sleep|strength"),
+        (3, "faerie fog|farsight|fireproof|flame arrow|float|haste|maze|perfect self|slow|water breathing|waterwalk"),
+        (4, "create lesser illusion|darkness|detect hidden|hold person|loop|mind blast"),
+        (5, "charm person|confusion|dimension door|hallucinations|hold animal|hold undead|mass invis|mend|psychic scream"),
+        (6, "charm monster|confusion shell|feeblemind|fly|hold monster|hold plant|locate object|shadow weapon|stone skin|summon"),
+        (7, "fetch|inspire|pass door|portal|power word stun|shadow conjuration"),
+        (8, "blink|create greater illusion|enchant armor|enchant weapon|power word blind|recharge"),
+        (9, "nexus|power word kill|shadow swarm"));
+
+    private const string Inwokacje = "Inwokacje";
+    private static readonly IReadOnlyList<SpellSeedEntry> InwokacjeSpells = SchoolSpells(Inwokacje,
+        (1, "acid hands|blur|bonelace|comprehend languages|detect magic|dismiss animal|dismiss insect|dismiss plant|infravision|light|lore undead|magic missile|mind strike|shield|slow rot"),
+        (2, "bear endurance|bull strength|burning hands|cat grace|change sex|chill touch|cold snap|colour spray|continual light|darkvision|detect invis|dismiss person|endure acid|endure cold|endure fire|endure lightning|energize|faerie fire|fox cunning|frost hands|identify|invisibility|mirror image|purify food|shocking grasp|strength|weaken"),
+        (3, "acid arrow|dismiss monster|dismiss outsider|dispel magic|faerie fog|farsight|fireproof|float|haste|healing sleep|increase wounds|lightning bolt|maze|slow|water breathing|waterwalk|web"),
+        (4, "acid blast|darkness|detect hidden|dismiss undead|ethereal armor|floating disc|force missiles|free action|mind blast|remove paralysis|vampiric touch"),
+        (5, "chaotic shock|dimension door|fireshield|flame lace|force bolt|iceshield|mend|minor globe of invulnerability|resist acid|resist cold|resist fire|resist lightning|resist normal weapon"),
+        (6, "chain lightning|fireball|fly|light nova|locate object|reflect spell I|resist elements|stone skin"),
+        (7, "cone of cold|energy shield|globe of invulnerability|pass door|power word stun|rain of blades|reflect spell II|thunder bolt"),
+        (8, "energy drain|energy strike|lightingshield|power word blind|psionic blast|recharge|resist magic weapon"),
+        (9, "power word kill"));
+
+    private const string Nekromancja = "Nekromancja";
+    private static readonly IReadOnlyList<SpellSeedEntry> NekromancjaSpells = SchoolSpells(Nekromancja,
+        (1, "acid hands|armor|bonelace|comprehend languages|detect magic|dismiss animal|dismiss insect|dismiss plant|draining hands|fire darts|infravision|light|lore undead|magic missile|shield|slow rot"),
+        (2, "bear endurance|bull strength|burning hands|cat grace|change sex|chill touch|cold snap|colour spray|darkvision|detect invis|dismiss person|endure acid|endure cold|endure fire|endure lightning|energize|faerie fire|floating skull|fox cunning|frost hands|identify|purify food|shocking grasp|strength|weaken"),
+        (3, "dismiss monster|dismiss outsider|dispel magic|embalm|farsight|fireproof|flame arrow|float|ghoul touch|haste|healing sleep|increase wounds|lightning bolt|slow|soul trap|spirit armor|water breathing|waterwalk|web"),
+        (4, "acid blast|animate dead|darkness|detect hidden|dismiss undead|ethereal armor|floating disc|free action|remove paralysis|vampiric touch"),
+        (5, "chaotic shock|decay|dimension door|fireshield|force bolt|iceshield|mend|minor globe of invulnerability|raise zombie|resist acid|resist cold|resist fire|resist lightning|resist normal weapon|unholy fury"),
+        (6, "chain lightning|fireball|fly|light nova|locate object|raise ghoul|reflect spell I|resist elements|shadow weapon|stone skin|summon"),
+        (7, "cone of cold|energy shield|globe of invulnerability|horrid wilting|pass door|portal|power word stun|raise ghast|reflect spell II"),
+        (8, "energy drain|lightingshield|orb of entropy|psionic blast|recharge|resist magic weapon"),
+        (9, "banshee|nexus|power word kill|revive"));
+
     private static readonly IReadOnlyDictionary<string, ClassAbilitySeed> ByClass = new[]
     {
         new ClassAbilitySeed(Paladyn, PaladynSkills, PaladynSpells),
@@ -847,6 +1000,13 @@ public static class AbilitySeedCatalog
         new ClassAbilitySeed(Wojownik, WojownikSkills, []),
         new ClassAbilitySeed(Barbarzynca, BarbarzyncaSkills, []),
         new ClassAbilitySeed(Mag, MagSkills, []),
+        new ClassAbilitySeed(Przemiany, [], PrzemianySpells),
+        new ClassAbilitySeed(Przywolania, [], PrzywolaniaSpells),
+        new ClassAbilitySeed(Poznanie, [], PoznanieSpells),
+        new ClassAbilitySeed(Zauroczenie, [], ZauroczenieSpells),
+        new ClassAbilitySeed(Iluzje, [], IluzjeSpells),
+        new ClassAbilitySeed(Inwokacje, [], InwokacjeSpells),
+        new ClassAbilitySeed(Nekromancja, [], NekromancjaSpells),
         new ClassAbilitySeed(Odrzucanie, [], OdrzucanieSpells),
     }.ToDictionary(seed => seed.Class, seed => seed, StringComparer.OrdinalIgnoreCase);
 

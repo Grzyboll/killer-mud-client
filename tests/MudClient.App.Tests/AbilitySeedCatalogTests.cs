@@ -94,6 +94,7 @@ public sealed class AbilitySeedCatalogTests
     public static IEnumerable<object[]> AllSeededClasses => new[]
     {
         "Paladyn", "Czarny Rycerz", "Złodziej", "Druid", "Nomad", "Kleryk", "Wojownik", "Barbarzyńca", "Mag",
+        "Przemiany", "Przywołania", "Poznanie", "Zauroczenie", "Iluzje", "Inwokacje", "Nekromancja",
     }.Select(name => new object[] { name });
 
     [Theory]
@@ -105,7 +106,7 @@ public sealed class AbilitySeedCatalogTests
     }
 
     [Theory]
-    [MemberData(nameof(AllSeededClasses))]
+    [MemberData(nameof(AllClassesWithSkills))]
     public void EveryClass_EverySkillHasAPositiveMinLevel(string className)
     {
         var seed = AbilitySeedCatalog.Find(className)!;
@@ -113,6 +114,9 @@ public sealed class AbilitySeedCatalogTests
         Assert.NotEmpty(seed.Skills);
         Assert.All(seed.Skills, skill => Assert.True(skill.MinLevel > 0, skill.Name));
     }
+
+    public static IEnumerable<object[]> AllClassesWithSkills => AllSeededClasses
+        .Where(row => AbilitySeedCatalog.Find((string)row[0])!.Skills.Count > 0);
 
     [Theory]
     [MemberData(nameof(AllSeededClasses))]
@@ -203,5 +207,47 @@ public sealed class AbilitySeedCatalogTests
         Assert.All(seed.Spells, spell => Assert.InRange(spell.Circle, 1, 9));
         Assert.All(seed.Spells, spell => Assert.Equal("Odrzucanie", spell.Class));
         Assert.Equal(seed.Spells.Select(spell => spell.Name), seed.AllNames);
+    }
+
+    [Fact]
+    public void Przemiany_HasTheSuppliedFullSpellListAcrossAllNineCircles()
+    {
+        var seed = AbilitySeedCatalog.Find("  PRZEMIANY  ")!;
+
+        Assert.Contains("Przemiany", AbilitySeedCatalog.KnownClasses);
+        Assert.Empty(seed.Skills);
+        Assert.Equal(120, seed.Spells.Count);
+        Assert.Equal(17, seed.Spells.Count(spell => spell.Circle == 1));
+        Assert.Equal(26, seed.Spells.Count(spell => spell.Circle == 2));
+        Assert.Equal(17, seed.Spells.Count(spell => spell.Circle == 3));
+        Assert.Equal(10, seed.Spells.Count(spell => spell.Circle == 4));
+        Assert.Equal(10, seed.Spells.Count(spell => spell.Circle == 5));
+        Assert.Equal(12, seed.Spells.Count(spell => spell.Circle == 6));
+        Assert.Equal(10, seed.Spells.Count(spell => spell.Circle == 7));
+        Assert.Equal(12, seed.Spells.Count(spell => spell.Circle == 8));
+        Assert.Equal(6, seed.Spells.Count(spell => spell.Circle == 9));
+        Assert.All(seed.Spells, spell => Assert.Equal("Przemiany", spell.Class));
+        Assert.DoesNotContain(seed.Spells.GroupBy(spell => spell.Name, StringComparer.OrdinalIgnoreCase),
+            group => group.Count() > 1);
+    }
+
+    public static IEnumerable<object[]> SuppliedSchoolSpellCounts =>
+    [
+        ["Przemiany", 120], ["Przywołania", 107], ["Poznanie", 149], ["Zauroczenie", 109],
+        ["Iluzje", 86], ["Inwokacje", 107], ["Nekromancja", 115],
+    ];
+
+    [Theory]
+    [MemberData(nameof(SuppliedSchoolSpellCounts))]
+    public void SuppliedSchool_HasTheExactProvidedSpellCountAndNoDuplicates(string school, int expectedCount)
+    {
+        var seed = AbilitySeedCatalog.Find(school)!;
+
+        Assert.Empty(seed.Skills);
+        Assert.Equal(expectedCount, seed.Spells.Count);
+        Assert.All(seed.Spells, spell => Assert.InRange(spell.Circle, 1, 9));
+        Assert.All(seed.Spells, spell => Assert.Equal(school, spell.Class));
+        Assert.DoesNotContain(seed.Spells.GroupBy(spell => spell.Name, StringComparer.OrdinalIgnoreCase),
+            group => group.Count() > 1);
     }
 }

@@ -136,6 +136,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Same role as <see cref="_pendingDamageLine"/>, for <see cref="AnnotateScoreLines"/>.</summary>
     private string _pendingScoreLine = string.Empty;
+    private readonly StringBuilder _pendingSkillsList = new();
+    private bool _isCollectingSkillsList;
+    private readonly StringBuilder _pendingSpellList = new();
+    private bool _isCollectingSpellList;
 
     private readonly AsyncRelayCommand _connectCommand;
     private readonly AsyncRelayCommand _disconnectCommand;
@@ -10073,8 +10077,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         CollectSkillKnowledge(text);
         var toDisplay = _profileSettings.ShowNumericDamageEnabled ? AnnotateDamageLines(text) : text;
         toDisplay = _profileSettings.AnnotateRandomBookClassEnabled ? AnnotateBookClasses(toDisplay) : toDisplay;
-        toDisplay = _profileSettings.AnnotateSkillTrainersEnabled ? AnnotateSkillTrainers(toDisplay) : toDisplay;
-        toDisplay = _profileSettings.AnnotateSpellSourcesEnabled ? AnnotateSpellSources(toDisplay) : toDisplay;
+        toDisplay = _profileSettings.AnnotateSkillTrainersEnabled ? BufferSkillsList(toDisplay) : toDisplay;
+        toDisplay = _profileSettings.AnnotateSpellSourcesEnabled ? BufferSpellList(toDisplay) : toDisplay;
         toDisplay = _profileSettings.AnnotateScoreEnabled ? AnnotateScoreLines(toDisplay) : toDisplay;
         toDisplay = AnnotateRoomVnum(toDisplay);
         Dispatcher.UIThread.Post(() => OutputReceived?.Invoke(toDisplay));
@@ -10253,6 +10257,55 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         output.Append(segments[^1]);
         return output.ToString();
+    }
+
+    private string BufferSkillsList(string chunk)
+    {
+        if (!_isCollectingSkillsList)
+        {
+            var (plain, indexes) = AnsiText.StripAnsiWithMap(chunk);
+            var match = Regex.Match(plain, @"Poziom\s+\d+:", RegexOptions.IgnoreCase);
+            if (!match.Success) return chunk;
+            var start = indexes[match.Index];
+            _isCollectingSkillsList = true;
+            _pendingSkillsList.Append(chunk[start..]);
+            chunk = chunk[..start];
+        }
+        else { _pendingSkillsList.Append(chunk); chunk = string.Empty; }
+        if (!_pendingSkillsList.ToString().Contains("Ograniczenia skilli", StringComparison.OrdinalIgnoreCase)) return chunk;
+        var formatted = SkillListColumnFormatter.Format(_pendingSkillsList.ToString(), Map.TeacherCatalog);
+        _pendingSkillsList.Clear(); _isCollectingSkillsList = false;
+        return chunk + formatted + "\r\n";
+    }
+
+    private string BufferSpellList(string chunk)
+    {
+        if (!_isCollectingSpellList)
+        {
+            var (plain, indexes) = AnsiText.StripAnsiWithMap(chunk);
+            var match = Regex.Match(plain, @"Kr[ąa]g\s+\d+:", RegexOptions.IgnoreCase);
+            if (!match.Success)
+                return chunk;
+
+            var start = indexes[match.Index];
+
+            _isCollectingSpellList = true;
+            _pendingSpellList.Append(chunk[start..]);
+            chunk = chunk[..start];
+        }
+        else
+        {
+            _pendingSpellList.Append(chunk);
+            chunk = string.Empty;
+        }
+
+        if (!_pendingSpellList.ToString().Contains("Aby sprawdzi", StringComparison.OrdinalIgnoreCase))
+            return chunk;
+
+        var formatted = SpellListColumnFormatter.Format(_pendingSpellList.ToString(), Map.SpellMobCatalog);
+        _pendingSpellList.Clear();
+        _isCollectingSpellList = false;
+        return chunk + formatted;
     }
 
     /// <summary>

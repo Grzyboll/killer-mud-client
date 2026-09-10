@@ -27,17 +27,6 @@ public static class PanelHelpCatalog
                 "W wyszukiwarce: Enter — poprzedni wynik; Shift+Enter — następny wynik."
             ]),
         new(
-            "Effects",
-            "Efekty i Kondycja",
-            "Panel pokazuje dolegliwości postaci oraz aktywne efekty otrzymywane z GMCP.",
-            [
-                "Zielone elementy oznaczają zwykłe korzystne efekty.",
-                "Czerwone elementy oznaczają dolegliwości, debuffy lub efekt zbliżający się do końca.",
-                "Wartość w nawiasie jest czasem albo liczbą pozostałych użyć, zależnie od danych przesłanych przez grę."
-            ],
-            "Przez ⚙ możesz włączyć rozszerzony widok, który pod nazwą efektu pokazuje również jego opis.",
-            []),
-        new(
             "Group",
             "Drużyna",
             "Panel pokazuje członków Twojej drużyny, ich stan zdrowia, poziom ruchu, pozycję oraz aktualne położenie. Przyciski pod postacią używają wybranego zaklęcia lub umiejętności na tej osobie.",
@@ -46,14 +35,14 @@ public static class PanelHelpCatalog
             []),
         new(
             "MemSpells",
-            "Mem i Buffy",
-            "Górna część pokazuje zaklęcia zapamiętane, wykorzystane i właśnie zapamiętywane. Sekcja Buffy pilnuje efektów z aktualnie wybranego zestawu.",
+            "Stan postaci",
+            "Panel pokazuje kondycję, własne buffy, pozostałe efekty oraz zwijaną listę zapamiętanych zaklęć.",
             [
                 "[+] — buff jest aktywny; [-] — buffa brakuje.",
                 "[2/1] — 2 użycia są zapamiętane, a 1 zostało wykorzystane.",
                 "Kliknięcie buffa rzuca go, jeśli zaklęcie jest dostępne. RZUĆ BRAKUJĄCE rzuca dostępne zaklęcia, których efektów brakuje."
             ],
-            "Przez ⚙ możesz tworzyć zestawy, zmieniać ich nazwy, usuwać je, dodawać śledzone zaklęcia i ustawić liczbę kolumn. Pojedynczy buff usuwa się przyciskiem ✕ w panelu.",
+            "Przez ⚙ możesz tworzyć zestawy, zmieniać ich nazwy, usuwać je, dodawać śledzone zaklęcia oraz ustawić liczbę kolumn wyłącznie dla własnych buffów. Pojedynczy buff usuwa się przyciskiem ✕ w panelu.",
             []),
         new(
             "OffensiveActions",

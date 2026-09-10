@@ -19,9 +19,8 @@ public sealed record MemSpellCircle
 
     public string Header => $"Krąg {Circle}";
 
-    /// <summary>E.g. "7" or "5 + 2…" when some slots are still being memorized.</summary>
-    public string CountDisplay =>
-        MemingCount > 0 ? $"{MemedCount} + {MemingCount}…" : $"{MemedCount}";
+    /// <summary>Ready versus used slots, e.g. "7/2".</summary>
+    public string CountDisplay => $"{MemedCount}/{UnmemedCount}";
 
     public bool HasMemed => MemedDisplay.Length > 0;
     public bool HasMeming => MemingDisplay.Length > 0;

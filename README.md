@@ -313,6 +313,14 @@ Zapisy znajdują się w `%AppData%\KillerMudClient\Statistics\Characters\<posta�
 Zmiana postaci przełącza statystyki i rozpoczyna nową sesję; reset dotyczy tylko rozpoznanej
 postaci. Starsze pliki w katalogu `Statistics` pozostają nietknięte i nie są automatycznie
 importowane, ponieważ mogą zawierać wyniki kilku postaci z jednego konta.
+Ucieczki i śmierci są liczone jako zdarzenia niezależnie od utraconego EXP, który jest pokazywany
+osobno. Rekord najmocniejszego ciosu uwzględnia wyłącznie obrażenia zadane przez bieżącą postać,
+nie ciosy pozostałych członków grupy widoczne w terminalu.
+Zakładka **Bilans HP** zestawia dokładne zmiany własnego HP z GMCP dla sesji i ostatniej walki.
+Rozpoznane obrażenia są dzielone na ataki, czary, efekty okresowe i inne zdarzenia, a leczenie na
+własne, otrzymane, okresowe, odpoczynek i pozostałe źródła. Leczenie udzielone innym jest oznaczane
+znakiem `~`: to szacunek skalowany poziomem postaci na podstawie pomiarów z równoległych logów,
+ponieważ `Char.Group` nie przekazuje dokładnego HP pozostałych członków drużyny.
 
 ### Diagnostyczne przechwytywanie sesji
 

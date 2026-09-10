@@ -11,8 +11,34 @@ using MudClient.App.Views.Panels;
 namespace MudClient.App.Tests;
 
 [Collection(AvaloniaUiCollection.Name)]
-public sealed class EffectsPanelUiTests
+public sealed class CharacterStatusPanelUiTests
 {
+    [AvaloniaFact]
+    public async Task OtherEffects_OmitsEffectRepresentedByOwnBuff()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "KillerMudClient-CharacterStatus-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            await using var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+            viewModel.Effects.Add(new StatusEffect("armor", "[+]", "", false, "", false, false, null));
+            viewModel.Effects.Add(new StatusEffect("zatrucie", "[-]", "", true, "", true, false, null));
+            viewModel.RequiredBuffs.Add(new BuffWatchEntry("armor"));
+
+            typeof(MainWindowViewModel).GetMethod("RefreshOtherEffects",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(viewModel, null);
+
+            var remaining = Assert.Single(viewModel.OtherEffects);
+            Assert.Equal("zatrucie", remaining.Name);
+            Assert.True(remaining.IsDebuff);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [AvaloniaFact]
     public async Task EffectDuration_ShowsInBasicView_DescriptionStaysExtendedOnly()
     {
@@ -27,7 +53,7 @@ public sealed class EffectsPanelUiTests
         {
             await using var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
             Assert.False(viewModel.ShowExtendedEffects);
-            viewModel.Effects.Add(new StatusEffect(
+            viewModel.OtherEffects.Add(new StatusEffect(
                 Name: "odbicie lustrzane",
                 Icon: "[+]",
                 Duration: "8",
@@ -39,9 +65,9 @@ public sealed class EffectsPanelUiTests
 
             var tool = new PanelTool
             {
-                Id = "Effects",
-                Title = "Efekty i Kondycja",
-                ViewType = typeof(EffectsPanelView),
+                Id = "MemSpells",
+                Title = "Stan postaci",
+                ViewType = typeof(MemSpellsPanelView),
                 Context = viewModel,
             };
             var host = new PanelToolView { DataContext = tool };

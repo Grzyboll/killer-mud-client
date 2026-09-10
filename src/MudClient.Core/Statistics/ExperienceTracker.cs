@@ -12,6 +12,8 @@ public enum ExperienceChangeKind
     DeathLoss,
     UnknownGain,
     UnknownLoss,
+    Flee,
+    Death,
 }
 
 public sealed record ExperienceChange(
@@ -174,10 +176,12 @@ public sealed partial class ExperienceTracker
         if (text.Equals("Tracisz troszke punktow doswiadczenia.", StringComparison.OrdinalIgnoreCase))
         {
             _pendingLoss = ExperienceChangeKind.FleeLoss;
+            result.Add(NewChange(ExperienceChangeKind.Flee, 0, null, _remaining ?? 0, timestamp));
         }
         else if (text.Contains("Nie zyjesz, co za pech", StringComparison.OrdinalIgnoreCase))
         {
             _pendingLoss = ExperienceChangeKind.DeathLoss;
+            result.Add(NewChange(ExperienceChangeKind.Death, 0, null, _remaining ?? 0, timestamp));
         }
 
         if (text.Contains("Zdobywasz poziom!", StringComparison.OrdinalIgnoreCase))

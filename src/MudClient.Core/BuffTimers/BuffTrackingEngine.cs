@@ -19,7 +19,7 @@ public sealed class BuffTrackingEngine
 
     public void SetLevel(int level) => _level = Math.Max(0, level);
 
-    public void ObserveCommand(string command, string? characterName, DateTimeOffset now)
+    public string? ObserveCommand(string command, string? characterName, DateTimeOffset now)
     {
         ExpirePending(now);
         if (SelfBuffCastParser.TryParse(command, characterName, out var buffName))
@@ -34,7 +34,10 @@ public sealed class BuffTrackingEngine
             _pendingCasts[buffName] = now
                 + PendingCastBaseLifetime
                 + TimeSpan.FromTicks(PendingCastQueueAllowance.Ticks * castsAhead);
+            return buffName;
         }
+
+        return null;
     }
 
     public void ProcessAffects(IEnumerable<string> affectNames, DateTimeOffset now)

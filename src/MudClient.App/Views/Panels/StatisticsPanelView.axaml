@@ -6,14 +6,15 @@
   <TabControl Classes="mud-subtabs">
     <TabItem Header="Sesja">
       <ScrollViewer><StackPanel Margin="10" Spacing="8">
-        <Border Classes="mud-section"><Grid Margin="10" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Border Classes="mud-section"><Grid Margin="10" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <TextBlock Text="Czas sesji"/><TextBlock Grid.Column="1" Text="{Binding Statistics.SessionDurationText}"/>
           <TextBlock Grid.Row="1" Text="EXP netto"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Statistics.NetExperience, StringFormat={}{0:N0}}"/>
           <TextBlock Grid.Row="2" Text="EXP/h"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Statistics.ExperiencePerHour, StringFormat={}{0:N0}}"/>
           <TextBlock Grid.Row="3" Text="EXP za zabicia"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Statistics.KillExperience, StringFormat={}{0:N0}}"/>
-          <TextBlock Grid.Row="4" Text="Ucieczki / śmierci"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Statistics.FleeAndDeathLossText}"/>
-          <TextBlock Grid.Row="5" Text="Zabicia / średnia nagroda"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Statistics.KillsAndAverageText}"/>
-          <TextBlock Grid.Row="6" Text="Obrażenia: własne / grupa"/><TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Statistics.OwnAndGroupDamageText}"/>
+          <TextBlock Grid.Row="4" Text="Ucieczki / śmierci"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Statistics.FleeAndDeathCountText}"/>
+          <TextBlock Grid.Row="5" Text="Utracony EXP: ucieczki / śmierci"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Statistics.FleeAndDeathLossText}"/>
+          <TextBlock Grid.Row="6" Text="Zabicia / średnia nagroda"/><TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Statistics.KillsAndAverageText}"/>
+          <TextBlock Grid.Row="7" Text="Obrażenia: własne / grupa"/><TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Statistics.OwnAndGroupDamageText}"/>
         </Grid></Border>
         <Border Classes="mud-section"><StackPanel Margin="10" Spacing="3">
           <TextBlock Text="Ostatnie zabicie" Classes="mud-faint"/><TextBlock Text="{Binding Statistics.LastEnemy}"/>
@@ -48,6 +49,50 @@
         </Border></DataTemplate>
       </ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
     </TabItem>
+    <TabItem Header="Bilans HP">
+      <TabControl Classes="mud-subtabs">
+        <TabItem Header="Sesja">
+          <ScrollViewer><StackPanel Margin="10" Spacing="8">
+            <Border Classes="mud-section" Padding="10"><Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Text="HP stracone"/><TextBlock Grid.Column="1" Text="{Binding Statistics.SessionHealthLost, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="1" Text="HP uleczone"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Statistics.SessionHealthRestored, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="2" Text="HP udzielone innym (szac.)"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Statistics.SessionHealingGiven, StringFormat=~{0:N0}}"/>
+              <TextBlock Grid.Row="3" Text="Bilans własnego HP"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Statistics.SessionHealthBalanceText}"/>
+              <TextBlock Grid.Row="4" Text="Największa utrata HP"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Statistics.SessionLargestHealthLoss, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="5" Text="Największe leczenie"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Statistics.SessionLargestHealing, StringFormat={}{0:N0}}"/>
+            </Grid></Border>
+            <ItemsControl ItemsSource="{Binding Statistics.SessionHealthBreakdown}"><ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:HealthBreakdownRow"><Border Classes="mud-section" Margin="0,2" Padding="8">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                  <TextBlock Text="{Binding Category}"/><TextBlock Grid.Column="1" Text="{Binding AmountText}"/>
+                  <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Classes="mud-faint" Text="{Binding Details}" TextWrapping="Wrap"/>
+                </Grid>
+              </Border></DataTemplate>
+            </ItemsControl.ItemTemplate></ItemsControl>
+          </StackPanel></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Ostatnia walka">
+          <ScrollViewer><StackPanel Margin="10" Spacing="8">
+            <Border Classes="mud-section" Padding="10"><Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Text="HP stracone"/><TextBlock Grid.Column="1" Text="{Binding Statistics.LastCombatHealthLost, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="1" Text="HP uleczone"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Statistics.LastCombatHealthRestored, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="2" Text="HP udzielone innym (szac.)"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Statistics.LastCombatHealingGiven, StringFormat=~{0:N0}}"/>
+              <TextBlock Grid.Row="3" Text="Bilans własnego HP"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Statistics.LastCombatHealthBalanceText}"/>
+              <TextBlock Grid.Row="4" Text="Największa utrata HP"/><TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Statistics.LastCombatLargestHealthLoss, StringFormat={}{0:N0}}"/>
+              <TextBlock Grid.Row="5" Text="Największe leczenie"/><TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Statistics.LastCombatLargestHealing, StringFormat={}{0:N0}}"/>
+            </Grid></Border>
+            <ItemsControl ItemsSource="{Binding Statistics.LastCombatHealthBreakdown}"><ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:HealthBreakdownRow"><Border Classes="mud-section" Margin="0,2" Padding="8">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                  <TextBlock Text="{Binding Category}"/><TextBlock Grid.Column="1" Text="{Binding AmountText}"/>
+                  <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Classes="mud-faint" Text="{Binding Details}" TextWrapping="Wrap"/>
+                </Grid>
+              </Border></DataTemplate>
+            </ItemsControl.ItemTemplate></ItemsControl>
+          </StackPanel></ScrollViewer>
+        </TabItem>
+      </TabControl>
+    </TabItem>
     <TabItem Header="Historia">
       <Grid RowDefinitions="*,Auto"><ScrollViewer><ItemsControl Margin="8" ItemsSource="{Binding Statistics.History}"><ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:SessionExperienceSummary"><Border Classes="mud-section" Margin="0,2" Padding="8"><StackPanel>
@@ -64,6 +109,27 @@
         <TextBlock Classes="mud-faint" Text="{Binding Statistics.TotalRecordedExperience, StringFormat=EXP netto: {0:N0}}"/>
         <TextBlock Classes="mud-faint" Text="{Binding Statistics.TotalKills, StringFormat=Zabicia: {0:N0}}"/>
       </StackPanel></Border></Grid>
+    </TabItem>
+    <TabItem Header="Buffy">
+      <ScrollViewer>
+        <ItemsControl Margin="8" ItemsSource="{Binding BuffStatistics}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BuffStatisticsSummary">
+              <Border Classes="mud-section" Margin="0,2" Padding="8">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Remaining}"/>
+                  <TextBlock Grid.Row="1" Classes="mud-faint" Text="{Binding Estimate, StringFormat=Estymowany czas: {0}}"/>
+                  <TextBlock Grid.Row="1" Grid.Column="1" Classes="mud-faint" Text="{Binding Confidence, StringFormat=Pewność: {0}}"/>
+                  <TextBlock Grid.Row="2" Classes="mud-faint" Text="{Binding SessionUses, StringFormat=Użycia w sesji: {0}}"/>
+                  <TextBlock Grid.Row="2" Grid.Column="1" Classes="mud-faint" Text="{Binding HistoryUses, StringFormat=Użycia w historii: {0}}"/>
+                  <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Classes="mud-faint" Text="{Binding SampleCount, StringFormat=Poprawne pomiary: {0}}"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
     </TabItem>
     <TabItem Header="Rekordy"><ScrollViewer><StackPanel Margin="12" Spacing="8">
       <TextBlock Text="{Binding Statistics.BestExperiencePerHour, StringFormat=Najlepszy EXP/h: {0:N0}}"/>

@@ -237,9 +237,8 @@ public sealed class MainWindowClickTests : IDisposable
             .Select(text => text.Text)
             .ToList();
         Assert.Contains("Terminal", panelHelpTexts);
-        Assert.Contains("Efekty i Kondycja", panelHelpTexts);
         Assert.Contains("Drużyna", panelHelpTexts);
-        Assert.Contains("Mem i Buffy", panelHelpTexts);
+        Assert.Contains("Stan postaci", panelHelpTexts);
         Assert.Contains("Offensywne i Definiowalne", panelHelpTexts);
         Assert.Contains("Automaty", panelHelpTexts);
         Assert.Contains("Auto: Drużyna", panelHelpTexts);

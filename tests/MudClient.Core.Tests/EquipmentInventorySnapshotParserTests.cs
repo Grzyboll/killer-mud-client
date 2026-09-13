@@ -56,6 +56,18 @@ public sealed class EquipmentInventorySnapshotParserTests
         Assert.False(EquipmentInventorySnapshotParser.IsInventoryMutationMessage("Koral mówi: Podnosisz mnie?"));
     }
 
+    [Theory]
+    [InlineData("Podnosisz koral.", InventoryMutationKind.Added)]
+    [InlineData("Kupujesz zdobione lustro.", InventoryMutationKind.Added)]
+    [InlineData("Upuszczasz koral.", InventoryMutationKind.Removed)]
+    [InlineData("Sprzedajesz koral.", InventoryMutationKind.Removed)]
+    [InlineData("Wkladasz koral do torby.", InventoryMutationKind.PutIntoContainer)]
+    [InlineData("Wyjmujesz koral z torby.", InventoryMutationKind.TakenFromContainer)]
+    public void ClassifiesObservedInventoryMutationMessages(string line, InventoryMutationKind expected)
+    {
+        Assert.Equal(expected, EquipmentInventorySnapshotParser.GetInventoryMutationKind(line));
+    }
+
     [Fact]
     public void ExamineDuplicateUsesInventoryBeforeEquipmentAndFirstWordOnly()
     {
@@ -69,6 +81,32 @@ public sealed class EquipmentInventorySnapshotParserTests
     public void ExamineIgnoresParentheticalVisualAnnotationsInTheName()
     {
         Assert.Equal("examine szkarlatny", EquipmentInventorySnapshotParser.BuildExamineCommand("(pulsuje) szkarlatny mlot (95%)", 1));
+    }
+
+    [Fact]
+    public void PlainItemNameRemovesColoursAndParentheticalAnnotations()
+    {
+        const string item = "\u001b[31m(pulsuje) szkarlatny mlot bojowy (95%) (pod rekawicami)\u001b[0m";
+
+        Assert.Equal("szkarlatny mlot bojowy", EquipmentInventorySnapshotParser.GetPlainItemName(item));
+    }
+
+    [Fact]
+    public void ParsesOnlyContainerContentsFromObservedExamineResponse()
+    {
+        const string response = "Opis torby.\n\nZszywana torba (nosisz przy sobie) zawiera:\n(pulsuje) dwureczny miecz 'Krwawa Klinga'\nszczurze oko\n\n<700/700hp 100/100mv> pokoj";
+
+        Assert.True(EquipmentInventorySnapshotParser.TryParseContainerContents(response, "zszywana torba (74%)", out var contents));
+        Assert.Collection(contents,
+            first => Assert.Equal("(pulsuje) dwureczny miecz 'Krwawa Klinga'", first.Name),
+            second => Assert.Equal("szczurze oko", second.Name));
+    }
+
+    [Fact]
+    public void DoesNotTreatOrdinaryExamineResponseAsAContainer()
+    {
+        Assert.False(EquipmentInventorySnapshotParser.TryParseContainerContents("Zszywana torba polyskuje magicznym blaskiem.", "zszywana torba", out var contents));
+        Assert.Empty(contents);
     }
 
     [Fact]

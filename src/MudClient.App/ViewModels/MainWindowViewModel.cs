@@ -29,6 +29,8 @@ namespace MudClient.App.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
+    private enum InventoryExaminePlan { All, None, NewItems, NamedItems }
+
     private const double SmartBuffPanelMinimumConfidence = 0.70;
     private const double SmartBuffPanelHighConfidence = 0.80;
     private const double SmartBuffPanelMinimumExpirationProbability = 0.70;
@@ -59,6 +61,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly ArtifactTryStore _artifactTryStore;
     private readonly ArtifactTryMappingCoordinator _artifactTryMappingCoordinator;
     private readonly Dictionary<string, string> _equipmentExamineDescriptions = new();
+    private readonly Dictionary<string, IReadOnlyList<InventoryItem>> _inventoryContainerContents = new();
     private EquipmentInventorySnapshot _equipmentInventorySnapshot = new([], []);
     private readonly Queue<(string Key, string Command, string ItemName)> _pendingEquipmentExamines = new();
     private string? _activeEquipmentExamineKey;
@@ -76,6 +79,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _equipmentInventoryCheckedForSession;
     private bool _refreshExamineOnlyNewEquipment;
     private HashSet<string>? _equipmentNamesToExamine;
+    private InventoryExaminePlan _inventoryExaminePlan = InventoryExaminePlan.All;
+    private readonly HashSet<string> _inventoryNamesToExamine = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<InventoryItem> _inventoryBeforeRefresh = [];
     private HashSet<string> _lowDurabilityWarningKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly GroupSpellStore _groupSpellStore;
     private readonly GmcpLocationResolver _locationResolver = new();
@@ -9051,6 +9057,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand<NoteEntry> EditNoteCommand => new(EditNote);
     public RelayCommand CancelNoteEditCommand => new(CancelNoteEdit);
     public RelayCommand<string> CopyToCommandBarCommand => new(CopyToCommandBar);
+    public RelayCommand<EquipmentInventoryRow> InsertEquipmentItemNameToCommandBarCommand => new(InsertEquipmentItemNameToCommandBar);
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentRemoveCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "remove"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
@@ -9062,6 +9069,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpecialistIdentifyCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "ident"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpellIdentifyCommand => new(ExecuteInventorySpellIdentifyAsync);
     public RelayCommand ClearToastsCommand => new(ClearToasts);
+
+    public IReadOnlyList<EquipmentInventoryRow> InventoryContainers => EquipmentInventory.Inventory
+        .Where(item => item.IsIdentifiedContainer)
+        .ToArray();
 
     // ========================================================================
     // Existing commands (preserved unchanged)
@@ -9328,6 +9339,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 }
 
                 EmitCommandEcho(command);
+                RememberContainerCommand(command);
 
                 try
                 {
@@ -10187,6 +10199,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch { Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0); }
     }
 
+    private void InsertEquipmentItemNameToCommandBar(EquipmentInventoryRow? row)
+    {
+        if (row is not null)
+        {
+            CopyToCommandBar(EquipmentInventorySnapshotParser.GetPlainItemName(row.Name));
+        }
+    }
+
     private async Task RequestInventorySilentlyAsync()
     {
         if (!IsConnected || Interlocked.CompareExchange(ref _hiddenInventoryResponsePending, 1, 0) != 0) return;
@@ -10198,6 +10218,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         _equipmentInventorySnapshot = new EquipmentInventorySnapshot([], []);
         _equipmentExamineDescriptions.Clear();
+        _inventoryContainerContents.Clear();
         _pendingEquipmentExamines.Clear();
         _activeEquipmentExamineKey = null;
         _activeEquipmentExamineItemName = null;
@@ -10208,6 +10229,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _selfExamineCompleted = false;
         _activeSelfExamineResponse.Clear();
         _equipmentNamesToExamine = null;
+        _inventoryExaminePlan = InventoryExaminePlan.All;
+        _inventoryNamesToExamine.Clear();
+        _inventoryBeforeRefresh = [];
         _lowDurabilityWarningKeys.Clear();
         _refreshExamineOnlyNewEquipment = false;
         _equipmentInventoryCheckedForSession = false;
@@ -10225,13 +10249,21 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         });
     }
 
-    private void RefreshInventoryAfterMutation()
+    private void RefreshInventoryAfterMutation(InventoryMutationKind mutation)
     {
         // A carried-container move, buy/sell, get or drop does not alter Equipment. Its inv
-        // snapshot is nevertheless stale, and it must not revive the automatic examine queue.
+        // snapshot is nevertheless stale; the replacement inventory is examined again so any
+        // confirmed container contents cannot survive a move.
         _refreshExamineOnlyNewEquipment = false;
         _equipmentNamesToExamine = [];
         _pendingEquipmentExamines.Clear();
+        if (_inventoryExaminePlan != InventoryExaminePlan.NamedItems)
+        {
+            _inventoryExaminePlan = mutation == InventoryMutationKind.Added
+                ? InventoryExaminePlan.NewItems
+                : InventoryExaminePlan.None;
+        }
+        _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
 
         // An outstanding eq refresh always requests inv after parsing its own response, which
         // preserves response order and avoids competing inv requests.
@@ -10251,7 +10283,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _activeSelfExamineResponse.Clear();
             _activeSelfExamine = false;
             _selfExamineCompleted = true;
-            Dispatcher.UIThread.Post(() => EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _tattoos));
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
             return false;
         }
         if (_activeEquipmentExamineKey is { } examineKey)
@@ -10267,12 +10299,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
             if (!EquipmentInventorySnapshotParser.ContainsPrompt(_activeEquipmentExamineResponse.ToString())) return false;
             // Keep the exact server response. Identification level is a server fact, not a client inference.
-            _equipmentExamineDescriptions[examineKey] = EquipmentInventorySnapshotParser.WithoutPromptForTooltip(_activeEquipmentExamineResponse.ToString(), _activeEquipmentExamineItemName);
+            var response = _activeEquipmentExamineResponse.ToString();
+            _equipmentExamineDescriptions[examineKey] = EquipmentInventorySnapshotParser.WithoutPromptForTooltip(response, _activeEquipmentExamineItemName);
+            if (examineKey.StartsWith("I:", StringComparison.Ordinal)
+                && EquipmentInventorySnapshotParser.TryParseContainerContents(response, _activeEquipmentExamineItemName ?? string.Empty, out var contents))
+            {
+                _inventoryContainerContents[examineKey] = contents;
+            }
+            else
+            {
+                _inventoryContainerContents.Remove(examineKey);
+            }
             _activeEquipmentExamineResponse.Clear();
             _activeEquipmentExaminePage.Clear();
             _activeEquipmentExamineKey = null;
             _activeEquipmentExamineItemName = null;
-            Dispatcher.UIThread.Post(() => EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _tattoos));
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
             _ = SendNextEquipmentExamineAsync();
             return false;
         }
@@ -10287,16 +10329,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     .Where(name => !previousNames.Contains(name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 _refreshExamineOnlyNewEquipment = false;
             }
-            Dispatcher.UIThread.Post(() => EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _tattoos));
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
             _ = RequestInventorySilentlyAsync();
             return true;
         }
         if (Volatile.Read(ref _hiddenInventoryResponsePending) == 1 && EquipmentInventorySnapshotParser.TryParseInventory(text, out var inventory))
         {
             Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+            var previousInventory = _equipmentInventorySnapshot.Inventory;
             _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Inventory = inventory };
+            PreserveInventoryMetadata(previousInventory, inventory);
             WarnAboutLowDurability(_equipmentInventorySnapshot);
-            Dispatcher.UIThread.Post(() => EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _tattoos));
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
             QueueEquipmentExamines();
             return true;
         }
@@ -10313,8 +10357,81 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, false, index);
             _pendingEquipmentExamines.Enqueue(($"E:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
         }
+        foreach (var index in GetInventoryIndicesToExamine())
+        {
+            var item = _equipmentInventorySnapshot.Inventory[index];
+            var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, true, index);
+            _pendingEquipmentExamines.Enqueue(($"I:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+        }
         _equipmentNamesToExamine = null;
+        _inventoryExaminePlan = InventoryExaminePlan.None;
+        _inventoryNamesToExamine.Clear();
+        _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
         _ = SendNextEquipmentExamineAsync();
+    }
+
+    private IEnumerable<int> GetInventoryIndicesToExamine()
+    {
+        return _inventoryExaminePlan switch
+        {
+            InventoryExaminePlan.All => Enumerable.Range(0, _equipmentInventorySnapshot.Inventory.Count),
+            InventoryExaminePlan.None => [],
+            InventoryExaminePlan.NamedItems => _equipmentInventorySnapshot.Inventory
+                .Select((item, index) => (item, index))
+                .Where(entry => _inventoryNamesToExamine.Contains(EquipmentInventorySnapshotParser.GetPlainItemName(entry.item.Name)))
+                .Select(entry => entry.index),
+            InventoryExaminePlan.NewItems => GetNewInventoryIndices(),
+            _ => []
+        };
+    }
+
+    private IEnumerable<int> GetNewInventoryIndices()
+    {
+        var previousCounts = _inventoryBeforeRefresh
+            .GroupBy(item => EquipmentInventorySnapshotParser.GetPlainItemName(item.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (item, index) in _equipmentInventorySnapshot.Inventory.Select((item, index) => (item, index)))
+        {
+            var name = EquipmentInventorySnapshotParser.GetPlainItemName(item.Name);
+            if (!previousCounts.TryGetValue(name, out var remaining) || remaining == 0)
+            {
+                yield return index;
+            }
+            else
+            {
+                previousCounts[name] = remaining - 1;
+            }
+        }
+    }
+
+    private void ApplyEquipmentInventoryPanel()
+    {
+        EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _inventoryContainerContents, _tattoos);
+        OnPropertyChanged(nameof(InventoryContainers));
+    }
+
+    private void PreserveInventoryMetadata(IReadOnlyList<InventoryItem> previous, IReadOnlyList<InventoryItem> current)
+    {
+        var oldIndicesByName = previous.Select((item, index) => (Name: EquipmentInventorySnapshotParser.GetPlainItemName(item.Name), Index: index))
+            .GroupBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => new Queue<int>(group.Select(entry => entry.Index)), StringComparer.OrdinalIgnoreCase);
+        var descriptions = _equipmentExamineDescriptions
+            .Where(entry => entry.Key.StartsWith("I:", StringComparison.Ordinal))
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+        var containers = _inventoryContainerContents.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+
+        foreach (var key in descriptions.Keys) _equipmentExamineDescriptions.Remove(key);
+        _inventoryContainerContents.Clear();
+
+        foreach (var (item, newIndex) in current.Select((item, index) => (item, index)))
+        {
+            var name = EquipmentInventorySnapshotParser.GetPlainItemName(item.Name);
+            if (!oldIndicesByName.TryGetValue(name, out var oldIndices) || oldIndices.Count == 0) continue;
+            var oldKey = $"I:{oldIndices.Dequeue()}";
+            var newKey = $"I:{newIndex}";
+            if (descriptions.TryGetValue(oldKey, out var description)) _equipmentExamineDescriptions[newKey] = description;
+            if (containers.TryGetValue(oldKey, out var contents)) _inventoryContainerContents[newKey] = contents;
+        }
     }
 
     private void WarnAboutLowDurability(EquipmentInventorySnapshot snapshot)
@@ -10721,6 +10838,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _combatCapture.RecordTelnet(line);
         if (_equipmentInventoryCheckedForSession && IsEquipmentChangeLine(line))
         {
+            _inventoryExaminePlan = InventoryExaminePlan.None;
             _refreshExamineOnlyNewEquipment = IsEquipmentAdditionLine(line);
             if (!_refreshExamineOnlyNewEquipment)
             {
@@ -10732,9 +10850,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
             _ = RefreshEquipmentInventorySilentlyAsync();
         }
-        else if (_equipmentInventoryCheckedForSession && EquipmentInventorySnapshotParser.IsInventoryMutationMessage(line))
+        else if (_equipmentInventoryCheckedForSession && EquipmentInventorySnapshotParser.GetInventoryMutationKind(line) is { } inventoryMutation)
         {
-            RefreshInventoryAfterMutation();
+            RefreshInventoryAfterMutation(inventoryMutation);
         }
 
         if (ExperienceStatisticsEnabled && _statisticsCharacterName is not null)
@@ -10890,6 +11008,75 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         _ = SendCommandAsync($"give {item.CommandReference.Argument} {recipient.Name}");
+    }
+
+    public void PutInventoryItemIntoContainer(EquipmentInventoryRow? item, EquipmentInventoryRow? container)
+    {
+        if (item is null || container is null || ReferenceEquals(item, container))
+        {
+            return;
+        }
+
+        PlanInventoryExamines(container.Name);
+        _ = SendCommandAsync($"put {item.CommandReference.Argument} {container.CommandReference.Argument}");
+    }
+
+    public void TakeContainerItem(EquipmentInventoryRow? container, ContainerInventoryItem? item)
+    {
+        if (container is null || item is null)
+        {
+            return;
+        }
+
+        PlanInventoryExamines(container.Name, item.Name);
+        _ = SendCommandAsync($"take {item.CommandReference.Argument} {container.CommandReference.Argument}");
+    }
+
+    private void PlanInventoryExamines(params string[] itemNames)
+    {
+        // A player-initiated container move supersedes any old full-snapshot examine queue.
+        // The already sent examine (if any) still receives its response, but it cannot advance
+        // into unrelated containers before the fresh inventory snapshot is available.
+        _pendingEquipmentExamines.Clear();
+        _equipmentNamesToExamine = [];
+        _inventoryExaminePlan = InventoryExaminePlan.NamedItems;
+        _inventoryNamesToExamine.Clear();
+        foreach (var itemName in itemNames)
+        {
+            var plainName = EquipmentInventorySnapshotParser.GetPlainItemName(itemName);
+            if (plainName.Length > 0) _inventoryNamesToExamine.Add(plainName);
+        }
+    }
+
+    private void RememberContainerCommand(string command)
+    {
+        var parts = command.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3) return;
+        var verb = parts[0];
+        if (!string.Equals(verb, "put", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(verb, "take", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(verb, "tak", StringComparison.OrdinalIgnoreCase)) return;
+
+        var container = _equipmentInventorySnapshot.Inventory
+            .Select((item, index) => (item, index))
+            .FirstOrDefault(entry => string.Equals(
+                EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, entry.item.Name, true, entry.index).Argument,
+                parts[2], StringComparison.OrdinalIgnoreCase));
+        if (container.item is null) return;
+
+        if (string.Equals(verb, "put", StringComparison.OrdinalIgnoreCase))
+        {
+            PlanInventoryExamines(container.item.Name);
+            return;
+        }
+
+        var containerKey = $"I:{container.index}";
+        var content = _inventoryContainerContents.TryGetValue(containerKey, out var contents)
+            ? contents.Select((item, index) => (item, index)).FirstOrDefault(entry => string.Equals(
+                EquipmentInventorySnapshotParser.ResolveItemCommandReference(new EquipmentInventorySnapshot([], contents), entry.item.Name, true, entry.index).Argument,
+                parts[1], StringComparison.OrdinalIgnoreCase))
+            : default;
+        PlanInventoryExamines(container.item.Name, content.item?.Name ?? string.Empty);
     }
 
     private bool ConsumeSilentEquipmentLine(string line)

@@ -6,6 +6,7 @@ namespace MudClient.Core.Equipment;
 public sealed record EquipmentItem(string Location, string Name);
 public sealed record InventoryItem(string Name);
 public sealed record EquipmentInventorySnapshot(IReadOnlyList<EquipmentItem> Equipment, IReadOnlyList<InventoryItem> Inventory);
+public enum InventoryMutationKind { Added, Removed, PutIntoContainer, TakenFromContainer }
 public sealed record ItemCommandReference(string Word, int Occurrence)
 {
     public string Argument => Occurrence <= 1 ? Word : $"{Occurrence}.{Word}";
@@ -70,6 +71,10 @@ public static partial class EquipmentInventorySnapshotParser
     /// command; only <see cref="BuildExamineCommand"/> has confirmed duplicate-numbering rules.</summary>
     public static string BuildItemCommandTarget(string itemName) => FirstWord(itemName);
 
+    /// <summary>Returns the complete item name suitable for inserting into the editable command
+    /// line. Terminal colour sequences and parenthetical visual annotations are excluded.</summary>
+    public static string GetPlainItemName(string itemName) => string.Join(' ', Words(itemName));
+
     /// <summary>Chooses the least ambiguous word from an item name against the server's combined
     /// inventory-then-equipment lookup list. The MUD was observed to treat a command word as a
     /// prefix, therefore "krysztal" also matches "krysztalowy". One- and two-character connector
@@ -132,18 +137,57 @@ public static partial class EquipmentInventorySnapshotParser
     public static string WithoutDurabilityPercent(string itemName) =>
         Durability().Replace(AnsiText.StripKillerColors(AnsiText.StripAnsi(itemName)), string.Empty).Trim();
 
+    /// <summary>Recognizes the observed container section in an <c>examine</c> response. Only
+    /// lines after "&lt;container&gt; (...) zawiera:" and before the prompt are returned; the
+    /// descriptive paragraph remains outside the container data.</summary>
+    public static bool TryParseContainerContents(string response, string itemName, out IReadOnlyList<InventoryItem> contents)
+    {
+        var expectedName = GetPlainItemName(itemName);
+        var lines = response.Split('\n');
+        var headerIndex = Array.FindIndex(lines, line =>
+        {
+            var plain = AnsiText.StripKillerColors(AnsiText.StripAnsi(line));
+            plain = Regex.Replace(plain, @"\([^)]*\)", " ").Trim();
+            const string suffix = " zawiera:";
+            return plain.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(plain[..^suffix.Length].Trim(), expectedName, StringComparison.OrdinalIgnoreCase);
+        });
+        if (headerIndex < 0)
+        {
+            contents = [];
+            return false;
+        }
+
+        var result = new List<InventoryItem>();
+        foreach (var raw in lines.Skip(headerIndex + 1))
+        {
+            var plain = AnsiText.StripKillerColors(AnsiText.StripAnsi(raw)).Trim();
+            if (PromptLine().IsMatch(plain)) break;
+            if (plain.Length > 0) result.Add(new InventoryItem(raw.Trim()));
+        }
+        contents = result;
+        return true;
+    }
+
     /// <summary>Recognizes only inventory mutations observed in server messages. A matching
     /// message means the top-level <c>inv</c> listing is stale, including when an item moved into
     /// or out of a carried container.</summary>
     public static bool IsInventoryMutationMessage(string line)
     {
+        return GetInventoryMutationKind(line) is not null;
+    }
+
+    /// <summary>Classifies only the successful inventory mutations observed in game logs.</summary>
+    public static InventoryMutationKind? GetInventoryMutationKind(string line)
+    {
         var plain = AnsiText.StripKillerColors(AnsiText.StripAnsi(line)).TrimStart();
-        return plain.StartsWith("Upuszczasz ", StringComparison.OrdinalIgnoreCase)
-            || plain.StartsWith("Podnosisz ", StringComparison.OrdinalIgnoreCase)
-            || plain.StartsWith("Wkladasz ", StringComparison.OrdinalIgnoreCase)
-            || plain.StartsWith("Wyjmujesz ", StringComparison.OrdinalIgnoreCase)
-            || plain.StartsWith("Sprzedajesz ", StringComparison.OrdinalIgnoreCase)
-            || plain.StartsWith("Kupujesz ", StringComparison.OrdinalIgnoreCase);
+        if (plain.StartsWith("Podnosisz ", StringComparison.OrdinalIgnoreCase)
+            || plain.StartsWith("Kupujesz ", StringComparison.OrdinalIgnoreCase)) return InventoryMutationKind.Added;
+        if (plain.StartsWith("Upuszczasz ", StringComparison.OrdinalIgnoreCase)
+            || plain.StartsWith("Sprzedajesz ", StringComparison.OrdinalIgnoreCase)) return InventoryMutationKind.Removed;
+        if (plain.StartsWith("Wkladasz ", StringComparison.OrdinalIgnoreCase)) return InventoryMutationKind.PutIntoContainer;
+        if (plain.StartsWith("Wyjmujesz ", StringComparison.OrdinalIgnoreCase)) return InventoryMutationKind.TakenFromContainer;
+        return null;
     }
 
     /// <summary>Prepares a tooltip from server data: CRLF is one line break, blank source lines

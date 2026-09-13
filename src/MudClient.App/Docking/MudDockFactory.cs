@@ -415,6 +415,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var statisticsTool = Tool("Statistics");
+        var equipmentInventoryTool = Tool("EquipmentInventory");
         var chatTool = Tool("Chat");
         var settingsTool = Tool("Settings");
 
@@ -466,6 +467,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(statisticsTool);
+        HiddenTools.Add(equipmentInventoryTool);
         HiddenTools.Add(chatTool);
         HiddenTools.Add(settingsTool);
 
@@ -488,6 +490,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var statisticsTool = Tool("Statistics");
+        var equipmentInventoryTool = Tool("EquipmentInventory");
         var chatTool = Tool("Chat");
         var settingsTool = Tool("Settings");
 
@@ -576,6 +579,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(statisticsTool);
+        HiddenTools.Add(equipmentInventoryTool);
         HiddenTools.Add(settingsTool);
 
         return rootDock;

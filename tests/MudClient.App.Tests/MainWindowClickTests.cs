@@ -23,22 +23,30 @@ namespace MudClient.App.Tests;
 /// the window delegates to <see cref="TerminalPanelView.Current"/>.
 /// </summary>
 [Collection(AvaloniaUiCollection.Name)]
-public sealed class MainWindowClickTests : IDisposable
+public sealed class MainWindowClickTests : IAsyncDisposable
 {
     private readonly string _tempDirectory = Path.Combine(
         Path.GetTempPath(), "KillerMudClient-MainWindowClickTests", Guid.NewGuid().ToString("N"));
     private MainWindow? _window;
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         // Every test in this class opens one MainWindow. Closing it before Avalonia.Headless
         // tears down the per-test compositor prevents its render-loop task leaking into the
         // next isolated application on a different test thread. Keep the window reference
         // directly: TerminalPanelView.Current can already belong to another isolated session
         // or be cleared while the visual tree is detaching.
-        _window?.Close();
-
-        Dispatcher.UIThread.RunJobs();
+        var window = _window;
+        if (window is not null)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                window.Close();
+                Dispatcher.UIThread.RunJobs();
+            });
+            await window.ViewModelDisposalTask;
+            await Dispatcher.UIThread.InvokeAsync(() => Dispatcher.UIThread.RunJobs());
+        }
 
         if (Directory.Exists(_tempDirectory))
         {

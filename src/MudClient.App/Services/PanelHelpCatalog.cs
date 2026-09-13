@@ -132,6 +132,18 @@ public static class PanelHelpCatalog
             "Panel nie zmienia obsługi GMCP. Służy do diagnostyki, tworzenia automatyzacji i sprawdzania danych udostępnianych przez serwer.",
             []),
         new(
+            "EquipmentInventory",
+            "Equipment & Inventory",
+            "Shows the latest confirmed equipment and carried-inventory snapshots. The server remains the source of truth; the panel only presents responses actually received by the client.",
+            [
+                "Equipment slots, inventory rows and tattoos are refreshed after confirmed game events and full snapshots.",
+                "Item tooltips retain the latest technical examine response received from the server; unidentified items therefore show only the information the server returned.",
+                "The Tattoos tab reads only tattoo blocks and their bracketed bonuses from examine self. Their numeric bonuses are included in the equipment total.",
+                "Weapon and shield sections show examine statistics when available. Red ⚠ percentage markers and a terminal warning identify items below 30% durability."
+            ],
+            "Right-click an equipment or inventory item to send a supported command. Inventory actions include examine, identify, give to a GMCP-reported room occupant, wear, hold, wield, drop and sell. This first stage has no panel-specific settings.",
+            []),
+        new(
             "Chat",
             "Czat",
             "Panel wydziela komunikację graczy z głównego tekstu terminala, aby łatwiej śledzić rozmowy.",

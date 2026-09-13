@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using System.Globalization;
 
 namespace MudClient.App.Models;
 
@@ -183,7 +184,7 @@ public sealed class TimerEntry : ObservableObject, IActivatableFolderItem
         if (totalMilliseconds < 10_000)
         {
             var tenths = Math.Ceiling(totalMilliseconds / 100);
-            return $"{tenths / 10:0.0} s";
+            return (tenths / 10d).ToString("0.0", CultureInfo.InvariantCulture) + " s";
         }
 
         var totalSeconds = (long)Math.Ceiling(totalMilliseconds / 1000);

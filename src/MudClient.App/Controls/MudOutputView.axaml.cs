@@ -157,6 +157,12 @@ public partial class MudOutputView : UserControl
         _liveTailPane.NotifyContentChanged();
     }
 
+    public void SetText(string text)
+    {
+        Clear();
+        AppendText(text);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);

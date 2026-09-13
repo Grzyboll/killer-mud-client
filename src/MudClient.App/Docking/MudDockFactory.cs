@@ -339,6 +339,7 @@ public sealed class MudDockFactory : Factory, IFactory
         NewTool("Notes", "✎ Notatki", typeof(Views.Panels.NotesPanelView), _mainContext);
         NewTool("Gmcp", "⇅ GMCP", typeof(Views.Panels.GmcpPanelView), _mainContext);
         NewTool("Statistics", "📈 Statystyki", typeof(Views.Panels.StatisticsPanelView), _mainContext);
+        NewTool("EquipmentInventory", "🎒 Ekwipunek", typeof(Views.Panels.EquipmentInventoryPanelView), _mainContext);
         NewTool("Chat", "💬 Czat", typeof(Views.Panels.ChatPanelView), _mainContext);
         NewTool("Settings", "🛠 Ustawienia", typeof(Views.Panels.SettingsPanelView), _mainContext);
     }
@@ -414,6 +415,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var statisticsTool = Tool("Statistics");
+        var equipmentInventoryTool = Tool("EquipmentInventory");
         var chatTool = Tool("Chat");
         var settingsTool = Tool("Settings");
 
@@ -465,6 +467,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(statisticsTool);
+        HiddenTools.Add(equipmentInventoryTool);
         HiddenTools.Add(chatTool);
         HiddenTools.Add(settingsTool);
 
@@ -487,6 +490,7 @@ public sealed class MudDockFactory : Factory, IFactory
         var notesTool = Tool("Notes");
         var gmcpTool = Tool("Gmcp");
         var statisticsTool = Tool("Statistics");
+        var equipmentInventoryTool = Tool("EquipmentInventory");
         var chatTool = Tool("Chat");
         var settingsTool = Tool("Settings");
 
@@ -575,6 +579,7 @@ public sealed class MudDockFactory : Factory, IFactory
         HiddenTools.Add(notesTool);
         HiddenTools.Add(gmcpTool);
         HiddenTools.Add(statisticsTool);
+        HiddenTools.Add(equipmentInventoryTool);
         HiddenTools.Add(settingsTool);
 
         return rootDock;

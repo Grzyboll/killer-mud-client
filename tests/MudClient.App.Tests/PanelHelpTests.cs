@@ -16,12 +16,12 @@ public sealed class PanelHelpTests
     [Fact]
     public void Catalog_HasOneCompleteTopicForEverySupportedPanel()
     {
-        Assert.Equal(14, PanelHelpCatalog.All.Count);
-        Assert.Equal(14, PanelHelpCatalog.All.Select(topic => topic.PanelId).Distinct().Count());
+        Assert.Equal(15, PanelHelpCatalog.All.Count);
+        Assert.Equal(15, PanelHelpCatalog.All.Select(topic => topic.PanelId).Distinct().Count());
         Assert.Equal([
                 "Terminal", "Group", "MemSpells", "OffensiveActions", "Automation",
                 "AutomationTeam", "AutomationTravel", "AutomationCombat", "AutomationFarm", "Notes",
-                "Gmcp", "Chat", "Settings", "Map"
+                "Gmcp", "EquipmentInventory", "Chat", "Settings", "Map"
             ],
             PanelHelpCatalog.All.Select(topic => topic.PanelId));
 
@@ -44,6 +44,7 @@ public sealed class PanelHelpTests
         var automation = PanelHelpCatalog.Find("Automation")!;
         var farm = PanelHelpCatalog.Find("AutomationFarm")!;
         var gmcp = PanelHelpCatalog.Find("Gmcp")!;
+        var equipment = PanelHelpCatalog.Find("EquipmentInventory")!;
 
         Assert.Contains("zapamiętanych użyć", group.Indicators.Single());
         Assert.Contains(mem.Indicators, indicator => indicator.Contains("[2/1]", StringComparison.Ordinal));
@@ -55,6 +56,8 @@ public sealed class PanelHelpTests
         Assert.Contains(automation.Indicators, indicator => indicator.Contains("naprawdę go uruchamia", StringComparison.Ordinal));
         Assert.Contains(farm.Indicators, indicator => indicator.Contains("~zaklęcie", StringComparison.Ordinal));
         Assert.Contains("diagnostyczny", gmcp.Overview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("server remains the source of truth", equipment.Overview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(equipment.Indicators, indicator => indicator.Contains("Tattoo", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]

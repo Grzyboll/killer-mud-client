@@ -339,6 +339,7 @@ public sealed class MudDockFactory : Factory, IFactory
         NewTool("Notes", "✎ Notatki", typeof(Views.Panels.NotesPanelView), _mainContext);
         NewTool("Gmcp", "⇅ GMCP", typeof(Views.Panels.GmcpPanelView), _mainContext);
         NewTool("Statistics", "📈 Statystyki", typeof(Views.Panels.StatisticsPanelView), _mainContext);
+        NewTool("EquipmentInventory", "🎒 Ekwipunek", typeof(Views.Panels.EquipmentInventoryPanelView), _mainContext);
         NewTool("Chat", "💬 Czat", typeof(Views.Panels.ChatPanelView), _mainContext);
         NewTool("Settings", "🛠 Ustawienia", typeof(Views.Panels.SettingsPanelView), _mainContext);
     }

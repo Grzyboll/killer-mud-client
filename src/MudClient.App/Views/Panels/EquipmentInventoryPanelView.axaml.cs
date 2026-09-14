@@ -20,4 +20,28 @@ public sealed partial class EquipmentInventoryPanelView : UserControl
 
         viewModel.GiveInventoryItem(item, recipient);
     }
+
+    private void PutInventoryItem_OnClick(object? sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not MenuItem { Tag: EquipmentInventoryRow item }
+            || eventArgs.Source is not MenuItem { DataContext: EquipmentInventoryRow container }
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.PutInventoryItemIntoContainer(item, container);
+    }
+
+    private void TakeContainerItem_OnClick(object? sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not MenuItem { Tag: EquipmentInventoryRow container }
+            || eventArgs.Source is not MenuItem { DataContext: ContainerInventoryItem item }
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.TakeContainerItem(container, item);
+    }
 }

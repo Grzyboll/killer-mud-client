@@ -141,7 +141,7 @@ public static class PanelHelpCatalog
                 "The Tattoos tab reads only tattoo blocks and their bracketed bonuses from examine self. Their numeric bonuses are included in the equipment total.",
                 "Weapon and shield sections show examine statistics when available. Red ⚠ percentage markers and a terminal warning identify items below 30% durability."
             ],
-            "Right-click an equipment or inventory item to send a supported command. Inventory actions include examine, identify, give to a GMCP-reported room occupant, wear, hold, wield, drop and sell. This first stage has no panel-specific settings.",
+            "Right-click an equipment or inventory item to send a supported command. Inventory items are examined in sequence; an examine response with a confirmed 'contains' section is remembered as a container, enabling Take and Put into that container. Other actions include identify, give to a GMCP-reported room occupant, wear, hold, wield, drop and sell. This first stage has no panel-specific settings.",
             []),
         new(
             "Chat",

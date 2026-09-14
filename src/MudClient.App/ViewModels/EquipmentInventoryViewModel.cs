@@ -16,16 +16,27 @@ public sealed partial class EquipmentInventoryViewModel : ObservableObject
     [ObservableProperty] private string _inventoryDisplayText = string.Empty;
     [ObservableProperty] private string _bonusSummaryText = "Brak opisów examine dla założonych przedmiotów.";
 
-    public void Apply(EquipmentInventorySnapshot snapshot, IReadOnlyDictionary<string, string> descriptions, IReadOnlyList<TattooItem> tattoos)
+    public void Apply(EquipmentInventorySnapshot snapshot, IReadOnlyDictionary<string, string> descriptions, IReadOnlyDictionary<string, IReadOnlyList<InventoryItem>> containerContents, IReadOnlyList<TattooItem> tattoos)
     {
         Replace(Equipment, snapshot.Equipment.Select((item, index) => new EquipmentInventoryRow(
             item.Location, item.Name, descriptions.GetValueOrDefault($"E:{index}"),
             EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, item.Name, false, index),
             EquipmentInventorySnapshotParser.GetDurabilityPercent(item.Name))));
-        Replace(Inventory, snapshot.Inventory.Select((item, index) => new EquipmentInventoryRow(
-            "", item.Name, descriptions.GetValueOrDefault($"I:{index}"),
-            EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, item.Name, true, index),
-            EquipmentInventorySnapshotParser.GetDurabilityPercent(item.Name))));
+        Replace(Inventory, snapshot.Inventory.Select((item, index) =>
+        {
+            var key = $"I:{index}";
+            var isContainer = containerContents.TryGetValue(key, out var detectedContents);
+            var contents = detectedContents ?? [];
+            var contentRows = isContainer
+                ? contents.Select((content, contentIndex) => new ContainerInventoryItem(
+                    content.Name,
+                    EquipmentInventorySnapshotParser.ResolveItemCommandReference(new EquipmentInventorySnapshot([], contents), content.Name, true, contentIndex))).ToArray()
+                : [];
+            return new EquipmentInventoryRow(
+                "", item.Name, descriptions.GetValueOrDefault(key),
+                EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, item.Name, true, index),
+                EquipmentInventorySnapshotParser.GetDurabilityPercent(item.Name), isContainer, contentRows);
+        }));
         Replace(Tattoos, tattoos);
         StatusText = $"Ostatni pełny odczyt: ekwipunek {Equipment.Count}, inventory {Inventory.Count}.";
         EquipmentDisplayText = string.Join(Environment.NewLine, Equipment.Select(row => $"{row.Location,-34} {row.Name}"));
@@ -81,10 +92,16 @@ public sealed partial class EquipmentInventoryViewModel : ObservableObject
 }
 /// <summary>One panel row. Menu actions only prepare a visible, editable command in the command bar;
 /// they never infer that an item supports a server-side action.</summary>
-public sealed record EquipmentInventoryRow(string Location, string Name, string? ExamineDescription, ItemCommandReference CommandReference, int? DurabilityPercent)
+public sealed record EquipmentInventoryRow(string Location, string Name, string? ExamineDescription, ItemCommandReference CommandReference, int? DurabilityPercent, bool IsIdentifiedContainer = false, IReadOnlyList<ContainerInventoryItem>? ContainerContents = null)
 {
     public bool IsLowDurability => DurabilityPercent is < 30;
     public string DurabilityWarningText => IsLowDurability ? $"⚠ {DurabilityPercent}%" : string.Empty;
+    public IReadOnlyList<ContainerInventoryItem> ContainerContentsOrEmpty => ContainerContents ?? [];
+    public string MenuDisplayName => AnsiText.StripKillerColors(AnsiText.StripAnsi(Name)).Trim();
+}
+public sealed record ContainerInventoryItem(string Name, ItemCommandReference CommandReference)
+{
+    public string MenuDisplayName => AnsiText.StripKillerColors(AnsiText.StripAnsi(Name)).Trim();
 }
 public sealed record EquipmentBonusSummaryRow(string Text, string Sources, string? Category)
 {

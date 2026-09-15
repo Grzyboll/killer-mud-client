@@ -29,10 +29,17 @@ namespace MudClient.App.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    private enum InventoryExaminePlan { All, None, NewItems, NamedItems }
+    private enum InventoryExaminePlan { All, None, NewItems, NamedItems, NewItemsAndNamedItems }
+    private enum InitialEquipmentScanStage { None, Room, Inventory, Equipment, EquipmentExamine, InventoryExamine, Tattoos, GroundExamine }
+    private enum GroundContainerAccessAction { Open, Unlock, Close, Lock }
 
     private const double SmartBuffPanelMinimumConfidence = 0.70;
     private const double SmartBuffPanelHighConfidence = 0.80;
+    // Temporary diagnostics for the startup scan. Commands and their server responses remain
+    // visible so a failed capture can be diagnosed from the terminal.
+    private const bool ShowEquipmentExamineCommandEcho = true;
+    private const bool ShowEquipmentScanResponses = true;
+    private static readonly TimeSpan EquipmentScanCommandGap = TimeSpan.FromMilliseconds(300);
     private const double SmartBuffPanelMinimumExpirationProbability = 0.70;
     private static readonly Uri DiscordInviteUri = new("https://discord.gg/6NRnxZeMTC");
     private static readonly Uri DiscussionsUri = new("https://github.com/Grzyboll/killer-mud-client/discussions");
@@ -62,12 +69,29 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly ArtifactTryMappingCoordinator _artifactTryMappingCoordinator;
     private readonly Dictionary<string, string> _equipmentExamineDescriptions = new();
     private readonly Dictionary<string, IReadOnlyList<InventoryItem>> _inventoryContainerContents = new();
+    private readonly Dictionary<string, ContainerAccessState> _containerAccessStates = new();
+    private (string Key, string ItemName, GroundContainerAccessAction Action, bool Succeeded)? _pendingGroundContainerAccess;
+    // A request waits briefly before being sent.  Keep that wait distinct from an active
+    // response capture: otherwise the response block which queued this request (for example
+    // "Otwierasz ..." plus its prompt) could be mistaken for the examine response.
+    private bool _equipmentExamineSendPending;
+    private Dictionary<string, string> _rareCategoriesByName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _announcedGroundRares = new(StringComparer.OrdinalIgnoreCase);
+    private bool _weeklyRareRefreshChecked;
+    private bool _weeklyRareRefreshPending;
+    private bool _weeklyRareRefreshStartScheduled;
+    private readonly Dictionary<string, HashSet<string>> _confirmedGroundContainersByRoom = new(StringComparer.Ordinal);
     private EquipmentInventorySnapshot _equipmentInventorySnapshot = new([], []);
+    private readonly object _roomGroundItemsLock = new();
+    private readonly StringBuilder _roomGroundItemsResponse = new();
+    private bool _collectingRoomGroundItems;
+    private bool _silentlyCollectingRoomGroundItems;
     private readonly Queue<(string Key, string Command, string ItemName)> _pendingEquipmentExamines = new();
     private string? _activeEquipmentExamineKey;
     private string? _activeEquipmentExamineItemName;
     private readonly StringBuilder _activeEquipmentExamineResponse = new();
     private readonly StringBuilder _activeEquipmentExaminePage = new();
+    private readonly HashSet<string> _activeEquipmentExamineTriedWords = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<TattooItem> _tattoos = [];
     private bool _activeSelfExamine;
     private bool _selfExamineCompleted;
@@ -76,6 +100,39 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly HashSet<string> _silentEquipmentResponseLines = new(StringComparer.Ordinal);
     private int _hiddenEquipmentResponsePending;
     private int _hiddenInventoryResponsePending;
+    private readonly StringBuilder _hiddenEquipmentResponse = new();
+    private readonly StringBuilder _hiddenInventoryResponse = new();
+    // A player-requested "inv" remains visible, but its confirmed snapshot is also a valid
+    // reconciliation point for the panel.
+    private int _manualInventoryResponsePending;
+    private int _hiddenRoomLookResponsePending;
+    private int _roomLookAfterInventoryRefreshPending;
+    private int _inventoryRefreshAfterWakeRoomLookPending;
+    private int _roomLookAfterInitialLoadPending;
+    // A combat-position update can arrive before the final death/loot lines. Wait for their
+    // following prompt before a silent look is allowed to own a response.
+    private int _roomLookAfterCombatPromptPending;
+    private bool _postCombatPromptObserved;
+    private CancellationTokenSource? _postCombatRoomLookDelayCts;
+    private int _inventoryMutationBatchCount;
+    private bool _inventoryBatchRefreshAnnounced;
+    private bool _inventoryBatchRefreshAwaitingCompletion;
+    // One all.<type> command can produce many mutation lines. Its inventory snapshot must wait
+    // for the terminating prompt rather than race the first acknowledgement.
+    private int _bulkInventoryActionAwaitingPrompt;
+    // The GMCP fighting state is authoritative for background equipment scans. Keep the first
+    // pre-combat snapshot so all requests accumulated during combat reconcile against one state.
+    private EquipmentInventorySnapshot? _equipmentInventorySnapshotBeforeCombat;
+    private bool _equipmentInventoryRefreshDeferredDuringCombat;
+    private IReadOnlyList<EquipmentItem>? _equipmentBeforeDeferredRefresh;
+    // Server messages for a rapid sequence of give/take operations arrive one at a time.
+    // Wait for the short quiet period after the last one before asking for a new inventory
+    // snapshot, otherwise an early "inv" response can omit the remaining operations.
+    private CancellationTokenSource? _inventoryMutationRefreshCts;
+    private bool _initialEquipmentLoadAnnounced;
+    private bool _initialEquipmentLoadPending;
+    private bool _initialEquipmentLoadPausedForSleep;
+    private InitialEquipmentScanStage _initialEquipmentScanStage;
     private bool _equipmentInventoryCheckedForSession;
     private bool _refreshExamineOnlyNewEquipment;
     private HashSet<string>? _equipmentNamesToExamine;
@@ -168,6 +225,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _isCollectingSkillsList;
     private readonly StringBuilder _pendingSpellList = new();
     private bool _isCollectingSpellList;
+    // A "mem" response also contains "Krag N:" rows, so that text alone is not sufficient
+    // evidence that the server is returning the separately formatted "spells" book.
+    private bool _awaitingSpellBookRows;
 
     private readonly AsyncRelayCommand _connectCommand;
     private readonly AsyncRelayCommand _disconnectCommand;
@@ -492,6 +552,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _bookCatalogRefreshCoordinator = bookCatalogRefreshCoordinator ?? new BookCatalogRefreshCoordinator();
         _usesCustomRareCatalogStore = rareCatalogStore is not null;
         _rareCatalogStore = rareCatalogStore ?? CreateRareCatalogStore();
+        TryLoadRareCategories();
         _rareCatalogRefreshCoordinator = rareCatalogRefreshCoordinator ?? new RareCatalogRefreshCoordinator();
         _abilityCaptureStore = abilityCaptureStore ?? new AbilityCaptureStore();
         _abilityMappingCoordinator = abilityMappingCoordinator ?? new AbilityMappingCoordinator();
@@ -3895,6 +3956,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         // Bumped unconditionally (even when disconnected) so TryAutoKillIfConfirmed can never
         // mistake a Room.People snapshot stamped before this room change for a fresh one.
         _roomEntryGeneration++;
+        // A GMCP location refresh may accompany a client-issued silent "look". Do not replace
+        // that capture with the ordinary visible room-entry capture before its response arrives.
+        if (Volatile.Read(ref _hiddenRoomLookResponsePending) == 0)
+        {
+            BeginRoomGroundItemsCapture();
+        }
 
         if (!IsConnected)
         {
@@ -8336,6 +8403,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         .OrderBy(person => person.Name, StringComparer.CurrentCultureIgnoreCase)
         .ToArray();
 
+    public bool HasInventoryGiveTargets => InventoryGiveTargets.Count > 0;
+
     // --- Automation rules (mock) ---
     public ObservableCollection<AutomationRuleEntry> AutomationRules { get; } = [];
 
@@ -9058,16 +9127,25 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand CancelNoteEditCommand => new(CancelNoteEdit);
     public RelayCommand<string> CopyToCommandBarCommand => new(CopyToCommandBar);
     public RelayCommand<EquipmentInventoryRow> InsertEquipmentItemNameToCommandBarCommand => new(InsertEquipmentItemNameToCommandBar);
-    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentExamineCommand => new(ExecuteEquipmentExamineAndRefreshAsync);
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentRemoveCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "remove"));
-    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundTakeCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "take"));
+    public AsyncRelayCommand<ItemBulkGroup> ExecuteGroundBulkTakeCommand => new(ExecuteGroundBulkTakeAsync);
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundUnlockCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Unlock));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundOpenCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Open));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundCloseCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Close));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundLockCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Lock));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryExamineCommand => new(ExecuteInventoryExamineAndRefreshAsync);
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryWearCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "wear"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryHoldCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "hold"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryWieldCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "wield"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventoryDropCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "drop"));
+    public AsyncRelayCommand<ItemBulkGroup> ExecuteInventoryBulkDropCommand => new(ExecuteInventoryBulkDropAsync);
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySellCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "sell"));
-    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpecialistIdentifyCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "ident"));
-    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpellIdentifyCommand => new(ExecuteInventorySpellIdentifyAsync);
+    public AsyncRelayCommand<ItemBulkGroup> ExecuteInventoryBulkSellCommand => new(ExecuteInventoryBulkSellAsync);
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpecialistIdentifyCommand => new(row => ExecuteInventoryItemCommandAndRefreshAsync(row, "ident"));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteInventorySpellIdentifyCommand => new(ExecuteInventorySpellIdentifyAndRefreshAsync);
     public RelayCommand ClearToastsCommand => new(ClearToasts);
 
     public IReadOnlyList<EquipmentInventoryRow> InventoryContainers => EquipmentInventory.Inventory
@@ -9340,6 +9418,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
                 EmitCommandEcho(command);
                 RememberContainerCommand(command);
+                if (string.Equals(command.Trim(), "look", StringComparison.OrdinalIgnoreCase))
+                {
+                    BeginRoomGroundItemsCapture();
+                }
 
                 try
                 {
@@ -10194,8 +10276,20 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RefreshEquipmentInventorySilentlyAsync()
     {
+        if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || Interlocked.CompareExchange(ref _hiddenEquipmentResponsePending, 1, 0) != 0) return;
-        try { await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] eq", 33)); await _session.SendCommandAsync("eq"); }
+        _hiddenEquipmentResponse.Clear();
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected)
+            {
+                Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
+                return;
+            }
+            await _session.SendCommandAsync("eq");
+            await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] eq", 33));
+        }
         catch { Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0); }
     }
 
@@ -10209,21 +10303,112 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RequestInventorySilentlyAsync()
     {
+        if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || Interlocked.CompareExchange(ref _hiddenInventoryResponsePending, 1, 0) != 0) return;
-        try { await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] inv", 33)); await _session.SendCommandAsync("inv"); }
+        _hiddenInventoryResponse.Clear();
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected)
+            {
+                Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+                return;
+            }
+            await _session.SendCommandAsync("inv");
+            await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] inv", 33));
+        }
         catch { Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0); }
+    }
+
+    private bool DeferEquipmentInventoryRefreshWhileFighting()
+    {
+        if (!AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition)) return false;
+
+        _equipmentInventorySnapshotBeforeCombat ??= _equipmentInventorySnapshot;
+        _equipmentInventoryRefreshDeferredDuringCombat = true;
+        return true;
+    }
+
+    private void RefreshDeferredEquipmentInventoryAfterCombat()
+    {
+        if (!_equipmentInventoryRefreshDeferredDuringCombat)
+        {
+            _equipmentInventorySnapshotBeforeCombat = null;
+            return;
+        }
+
+        var beforeCombat = _equipmentInventorySnapshotBeforeCombat ?? _equipmentInventorySnapshot;
+        _equipmentInventorySnapshotBeforeCombat = null;
+        _equipmentInventoryRefreshDeferredDuringCombat = false;
+
+        // One complete post-combat pass replaces any number of deferred refreshes. Descriptions
+        // are requested only for new rows compared with the snapshot taken before combat.
+        _pendingEquipmentExamines.Clear();
+        _refreshExamineOnlyNewEquipment = true;
+        _equipmentNamesToExamine = null;
+        _equipmentBeforeDeferredRefresh = beforeCombat.Equipment;
+        _inventoryBeforeRefresh = beforeCombat.Inventory;
+        _inventoryExaminePlan = InventoryExaminePlan.NewItems;
+        _inventoryNamesToExamine.Clear();
+        _ = RefreshEquipmentInventorySilentlyAsync();
+    }
+
+    private async Task RequestRoomLookSilentlyAsync(bool afterInitialEquipmentLoad = false)
+    {
+        if (_initialEquipmentLoadPending
+            || (_initialEquipmentLoadAnnounced
+                && (!afterInitialEquipmentLoad || _initialEquipmentScanStage != InitialEquipmentScanStage.Room)))
+        {
+            // A session-start scan is one serial conversation. Only the explicit first Room
+            // stage may begin its look; a boolean alone must never bypass the sequence.
+            Interlocked.Exchange(ref _roomLookAfterInitialLoadPending, 1);
+            return;
+        }
+        if (!IsConnected || Interlocked.CompareExchange(ref _hiddenRoomLookResponsePending, 1, 0) != 0) return;
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected || (afterInitialEquipmentLoad
+                && (_initialEquipmentLoadPausedForSleep || _initialEquipmentScanStage != InitialEquipmentScanStage.Room)))
+            {
+                Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+                return;
+            }
+            BeginRoomGroundItemsCapture(silently: true);
+            await _session.SendCommandAsync("look");
+            await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] look", 33));
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+            lock (_roomGroundItemsLock)
+            {
+                _collectingRoomGroundItems = false;
+                _silentlyCollectingRoomGroundItems = false;
+                _roomGroundItemsResponse.Clear();
+            }
+            CompleteInitialEquipmentInventoryLoad();
+            TryRefreshWeeklyRareList();
+        }
     }
 
     private void ResetEquipmentInventoryForCharacter()
     {
+        Interlocked.Exchange(ref _inventoryMutationRefreshCts, null)?.Cancel();
         _equipmentInventorySnapshot = new EquipmentInventorySnapshot([], []);
         _equipmentExamineDescriptions.Clear();
         _inventoryContainerContents.Clear();
+        _containerAccessStates.Clear();
+        _pendingGroundContainerAccess = null;
+        _confirmedGroundContainersByRoom.Clear();
         _pendingEquipmentExamines.Clear();
+        Interlocked.Exchange(ref _bulkInventoryActionAwaitingPrompt, 0);
+        _equipmentExamineSendPending = false;
         _activeEquipmentExamineKey = null;
         _activeEquipmentExamineItemName = null;
         _activeEquipmentExamineResponse.Clear();
         _activeEquipmentExaminePage.Clear();
+        _activeEquipmentExamineTriedWords.Clear();
         _tattoos = [];
         _activeSelfExamine = false;
         _selfExamineCompleted = false;
@@ -10233,11 +10418,37 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _inventoryNamesToExamine.Clear();
         _inventoryBeforeRefresh = [];
         _lowDurabilityWarningKeys.Clear();
+        _inventoryMutationBatchCount = 0;
+        _inventoryBatchRefreshAnnounced = false;
+        _inventoryBatchRefreshAwaitingCompletion = false;
+        _equipmentInventorySnapshotBeforeCombat = null;
+        _equipmentInventoryRefreshDeferredDuringCombat = false;
+        _equipmentBeforeDeferredRefresh = null;
+        _initialEquipmentLoadAnnounced = false;
+        _initialEquipmentLoadPending = false;
+        _initialEquipmentLoadPausedForSleep = false;
+        _initialEquipmentScanStage = InitialEquipmentScanStage.None;
         _refreshExamineOnlyNewEquipment = false;
         _equipmentInventoryCheckedForSession = false;
         _latestRoomPeople = [];
+        lock (_roomGroundItemsLock)
+        {
+            _collectingRoomGroundItems = false;
+            _silentlyCollectingRoomGroundItems = false;
+            _roomGroundItemsResponse.Clear();
+        }
         Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
         Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+        _hiddenEquipmentResponse.Clear();
+        _hiddenInventoryResponse.Clear();
+        Interlocked.Exchange(ref _manualInventoryResponsePending, 0);
+        Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+        Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 0);
+        Interlocked.Exchange(ref _inventoryRefreshAfterWakeRoomLookPending, 0);
+        Interlocked.Exchange(ref _roomLookAfterInitialLoadPending, 0);
+        Interlocked.Exchange(ref _roomLookAfterCombatPromptPending, 0);
+        _postCombatPromptObserved = false;
+        Interlocked.Exchange(ref _postCombatRoomLookDelayCts, null)?.Cancel();
         lock (_silentEquipmentResponseLock)
         {
             _silentEquipmentResponseLines.Clear();
@@ -10246,6 +10457,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             EquipmentInventory.Reset();
             OnPropertyChanged(nameof(InventoryGiveTargets));
+            OnPropertyChanged(nameof(HasInventoryGiveTargets));
         });
     }
 
@@ -10257,7 +10469,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _refreshExamineOnlyNewEquipment = false;
         _equipmentNamesToExamine = [];
         _pendingEquipmentExamines.Clear();
-        if (_inventoryExaminePlan != InventoryExaminePlan.NamedItems)
+        if (mutation == InventoryMutationKind.TakenFromContainer)
+        {
+            _inventoryExaminePlan = _inventoryExaminePlan == InventoryExaminePlan.NamedItems
+                ? InventoryExaminePlan.NewItemsAndNamedItems
+                : InventoryExaminePlan.NewItems;
+        }
+        else if (_inventoryExaminePlan != InventoryExaminePlan.NamedItems)
         {
             _inventoryExaminePlan = mutation == InventoryMutationKind.Added
                 ? InventoryExaminePlan.NewItems
@@ -10265,12 +10483,107 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
         _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
 
-        // An outstanding eq refresh always requests inv after parsing its own response, which
-        // preserves response order and avoids competing inv requests.
-        if (Volatile.Read(ref _hiddenEquipmentResponsePending) == 0)
+        ScheduleInventoryRefreshAfterMutation();
+    }
+
+    private void ScheduleInventoryRefreshAfterMutation()
+    {
+        if (Volatile.Read(ref _bulkInventoryActionAwaitingPrompt) == 1) return;
+        var refreshCts = new CancellationTokenSource();
+        var previousRefresh = Interlocked.Exchange(ref _inventoryMutationRefreshCts, refreshCts);
+        previousRefresh?.Cancel();
+        _ = RefreshInventoryAfterMutationQuietlyAsync(refreshCts);
+    }
+
+    private async Task RefreshInventoryAfterMutationQuietlyAsync(CancellationTokenSource refreshCts)
+    {
+        try
         {
-            _ = RequestInventorySilentlyAsync();
+            // This is deliberately a debounce rather than a delay after the first change.
+            // Every subsequent give/take restarts it, so one snapshot represents the whole burst.
+            await Task.Delay(TimeSpan.FromMilliseconds(400), refreshCts.Token);
+
+            // Let an existing equipment scan finish first: it owns the next inv request.
+            if (Volatile.Read(ref _hiddenEquipmentResponsePending) != 0)
+            {
+                return;
+            }
+
+            // A previously requested inventory response cannot include commands that arrived
+            // afterwards. Wait for it, then issue one fresh snapshot for this mutation burst.
+            while (Volatile.Read(ref _hiddenInventoryResponsePending) != 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), refreshCts.Token);
+            }
+
+            if (Volatile.Read(ref _hiddenEquipmentResponsePending) == 0)
+            {
+                await RequestInventorySilentlyAsync();
+            }
         }
+        catch (OperationCanceledException) when (refreshCts.IsCancellationRequested)
+        {
+            // A later inventory mutation superseded this scheduled refresh.
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _inventoryMutationRefreshCts, null, refreshCts);
+            refreshCts.Dispose();
+        }
+    }
+
+    private async Task SendBulkInventoryCommandAsync(string command)
+    {
+        // Supersede a debounce left by an earlier individual mutation. The first response line
+        // from this command must never refresh the panel before the rest of the server reply.
+        Interlocked.Exchange(ref _bulkInventoryActionAwaitingPrompt, 1);
+        Interlocked.Exchange(ref _inventoryMutationRefreshCts, null)?.Cancel();
+        try
+        {
+            await SendCommandAsync(command);
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _bulkInventoryActionAwaitingPrompt, 0);
+            throw;
+        }
+    }
+
+    private void CompleteBulkInventoryActionAtPrompt(string text)
+    {
+        if (Volatile.Read(ref _bulkInventoryActionAwaitingPrompt) == 0
+            || !EquipmentInventorySnapshotParser.ContainsPrompt(text)) return;
+
+        Interlocked.Exchange(ref _bulkInventoryActionAwaitingPrompt, 0);
+        // Preserve the normal short quiet-period debounce after the completed response. This
+        // also handles a grouped command that changed no item without leaving the panel stale.
+        ScheduleInventoryRefreshAfterMutation();
+    }
+
+    private void RemovePickedUpGroundItem(string pickedUpItem)
+    {
+        var groundItems = _equipmentInventorySnapshot.GroundItems.ToList();
+        var index = groundItems.FindIndex(item => string.Equals(
+            EquipmentInventorySnapshotParser.GetPlainItemName(item.Name),
+            EquipmentInventorySnapshotParser.GetPlainItemName(pickedUpItem),
+            StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            return;
+        }
+
+        groundItems.RemoveAt(index);
+        _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Ground = groundItems };
+        foreach (var item in groundItems)
+        {
+            var plainName = EquipmentInventorySnapshotParser.GetPlainItemName(item.Name);
+            if (_rareCategoriesByName.TryGetValue(plainName, out var category)
+                && _announcedGroundRares.Add($"{Map.CurrentVnum}:{plainName}"))
+            {
+                Dispatcher.UIThread.Post(() => EmitSystem($"[Pokój] {category.ToUpperInvariant()}: {plainName}", 31));
+            }
+        }
+        Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
     }
 
     private bool HandleEquipmentInventoryResponse(string text)
@@ -10278,37 +10591,108 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (_activeSelfExamine)
         {
             _activeSelfExamineResponse.Append(text);
-            if (!EquipmentInventorySnapshotParser.ContainsPrompt(_activeSelfExamineResponse.ToString())) return false;
+            // A player command sent during reconnect can finish before examine self starts.
+            // Its prompt is not the completion of self examination; the observed self output
+            // contains the character's "uzywa:" table after its tattoo section.
+            if (!ContainsPromptAfterMarker(_activeSelfExamineResponse.ToString(), " uzywa:")) return !ShowEquipmentScanResponses;
             _tattoos = SelfExamineTattooParser.Parse(_activeSelfExamineResponse.ToString());
             _activeSelfExamineResponse.Clear();
             _activeSelfExamine = false;
             _selfExamineCompleted = true;
             Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
-            return false;
+            if (_initialEquipmentLoadAnnounced && _initialEquipmentScanStage == InitialEquipmentScanStage.Tattoos)
+            {
+                _initialEquipmentScanStage = InitialEquipmentScanStage.GroundExamine;
+                QueueGroundContainerExamines();
+                return !ShowEquipmentScanResponses;
+            }
+            TryRefreshWeeklyRareList();
+            return !ShowEquipmentScanResponses;
         }
         if (_activeEquipmentExamineKey is { } examineKey)
         {
             _activeEquipmentExamineResponse.Append(text);
             _activeEquipmentExaminePage.Append(text);
+            if (EquipmentInventorySnapshotParser.IsDirectionQuestion(_activeEquipmentExamineResponse.ToString())
+                && TryRetryActiveEquipmentExamineWithNextWord())
+            {
+                return !ShowEquipmentScanResponses;
+            }
             if (RareListParser.ContainsPagerPrompt([_activeEquipmentExaminePage.ToString()]))
             {
                 _activeEquipmentExaminePage.Clear();
-                // Examine is deliberately visible for diagnosis. Do not advance a server pager
-                // on the player's behalf; its prompt and the rest of the response stay terminal-visible.
-                return false;
+                _ = SendEquipmentPagerContinueAsync();
+                return !ShowEquipmentScanResponses;
             }
-            if (!EquipmentInventorySnapshotParser.ContainsPrompt(_activeEquipmentExamineResponse.ToString())) return false;
+            // Examine descriptions freely inflect the item name (for example, command
+            // "examine mithrilowa" can answer "mithrilowej bransolety"). The command is sent
+            // one at a time, so its following prompt is the authoritative response boundary;
+            // requiring the original nominative word would leave the queue stuck.
+            if (!EquipmentInventorySnapshotParser.ContainsPrompt(_activeEquipmentExamineResponse.ToString())) return !ShowEquipmentScanResponses;
             // Keep the exact server response. Identification level is a server fact, not a client inference.
             var response = _activeEquipmentExamineResponse.ToString();
+            var examinedItemName = _activeEquipmentExamineItemName ?? string.Empty;
+            var canBeContainer = examineKey.StartsWith("I:", StringComparison.Ordinal)
+                || examineKey.StartsWith("G:", StringComparison.Ordinal);
+            IReadOnlyList<InventoryItem> contents = [];
+            var hasContents = canBeContainer
+                && EquipmentInventorySnapshotParser.TryParseContainerContents(
+                    response,
+                    examinedItemName,
+                    out contents,
+                    acceptServerContainerAlias: examineKey.StartsWith("G:", StringComparison.Ordinal));
+            var isClosedContainer = canBeContainer && EquipmentInventorySnapshotParser.IsClosedContainerResponse(response);
+            if (!EquipmentInventorySnapshotParser.IsLikelyExamineResponseForItem(response, examinedItemName)
+                && !hasContents && !isClosedContainer)
+            {
+                var source = examineKey.StartsWith("E:", StringComparison.Ordinal) ? "Equipment"
+                    : examineKey.StartsWith("I:", StringComparison.Ordinal) ? "Inventory"
+                    : "na ziemi";
+                Dispatcher.UIThread.Post(() => EmitSystem($"[Ekwipunek] Niepewne sprawdzenie: {EquipmentInventorySnapshotParser.GetPlainItemName(examinedItemName)} ({source}).", 31));
+            }
             _equipmentExamineDescriptions[examineKey] = EquipmentInventorySnapshotParser.WithoutPromptForTooltip(response, _activeEquipmentExamineItemName);
-            if (examineKey.StartsWith("I:", StringComparison.Ordinal)
-                && EquipmentInventorySnapshotParser.TryParseContainerContents(response, _activeEquipmentExamineItemName ?? string.Empty, out var contents))
+            if (hasContents)
             {
                 _inventoryContainerContents[examineKey] = contents;
+                if (examineKey.StartsWith("G:", StringComparison.Ordinal))
+                {
+                    SetGroundContainerAccessState(examineKey, ContainerAccessState.Open, "examine");
+                }
+                foreach (var content in contents)
+                {
+                    var rareName = EquipmentInventorySnapshotParser.GetPlainItemName(content.Name);
+                    if (_rareCategoriesByName.TryGetValue(rareName, out var rareCategory)
+                        && _announcedGroundRares.Add($"{Map.CurrentVnum}:{examineKey}:{rareName}"))
+                    {
+                        Dispatcher.UIThread.Post(() => EmitSystem($"[Pokój] {rareCategory.ToUpperInvariant()} w kontenerze: {rareName}", 31));
+                    }
+                }
+                if (examineKey.StartsWith("G:", StringComparison.Ordinal))
+                {
+                    RememberConfirmedGroundContainer(_activeEquipmentExamineItemName ?? string.Empty);
+                }
+            }
+            else if (isClosedContainer)
+            {
+                // The server confirms a container but withholds its contents until it is opened.
+                _inventoryContainerContents[examineKey] = [];
+                if (examineKey.StartsWith("G:", StringComparison.Ordinal))
+                {
+                    SetGroundContainerAccessState(examineKey, ContainerAccessState.Closed, "examine");
+                    RememberConfirmedGroundContainer(_activeEquipmentExamineItemName ?? string.Empty);
+                }
+            }
+            else if (examineKey.StartsWith("G:", StringComparison.Ordinal)
+                && _containerAccessStates.GetValueOrDefault(examineKey) == ContainerAccessState.Open)
+            {
+                // "Otwierasz ..." is already an authoritative fact. Retain the identified,
+                // open container even if this later examine uses a server alias we cannot map.
+                _inventoryContainerContents.TryAdd(examineKey, []);
             }
             else
             {
                 _inventoryContainerContents.Remove(examineKey);
+                _containerAccessStates.Remove(examineKey);
             }
             _activeEquipmentExamineResponse.Clear();
             _activeEquipmentExaminePage.Clear();
@@ -10316,12 +10700,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _activeEquipmentExamineItemName = null;
             Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
             _ = SendNextEquipmentExamineAsync();
-            return false;
+            return !ShowEquipmentScanResponses;
         }
-        if (Volatile.Read(ref _hiddenEquipmentResponsePending) == 1 && EquipmentInventorySnapshotParser.TryParseEquipment(text, out var equipment))
+        if (Volatile.Read(ref _hiddenEquipmentResponsePending) == 1)
         {
+            _hiddenEquipmentResponse.Append(text);
+            var response = _hiddenEquipmentResponse.ToString();
+            if (!response.Contains("Uzywasz:", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!ContainsPromptAfterMarker(response, "Uzywasz:")) return !ShowEquipmentScanResponses;
+            if (!EquipmentInventorySnapshotParser.TryParseEquipment(response, out var equipment)) return !ShowEquipmentScanResponses;
+
             Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
-            var previousNames = _equipmentInventorySnapshot.Equipment.Select(item => AnsiText.StripKillerColors(AnsiText.StripAnsi(item.Name))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _hiddenEquipmentResponse.Clear();
+            var previousNames = (_equipmentBeforeDeferredRefresh ?? _equipmentInventorySnapshot.Equipment)
+                .Select(item => AnsiText.StripKillerColors(AnsiText.StripAnsi(item.Name)))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _equipmentBeforeDeferredRefresh = null;
             _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Equipment = equipment };
             if (_refreshExamineOnlyNewEquipment)
             {
@@ -10330,43 +10724,123 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 _refreshExamineOnlyNewEquipment = false;
             }
             Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
-            _ = RequestInventorySilentlyAsync();
-            return true;
+            if (_initialEquipmentLoadAnnounced)
+            {
+                // Equipment command references are resolved against the shared server order:
+                // ground, inventory, then equipment. Fetch inventory before examining either
+                // list, otherwise an equipped "krysztal" can incorrectly select an unseen
+                // inventory "krysztalowa ..." item.
+                _initialEquipmentScanStage = InitialEquipmentScanStage.EquipmentExamine;
+                QueueEquipmentExamines(includeEquipment: true, includeInventory: false);
+            }
+            else
+            {
+                _ = RequestInventorySilentlyAsync();
+            }
+            return !ShowEquipmentScanResponses;
         }
-        if (Volatile.Read(ref _hiddenInventoryResponsePending) == 1 && EquipmentInventorySnapshotParser.TryParseInventory(text, out var inventory))
+        var isSilentInventoryResponse = Volatile.Read(ref _hiddenInventoryResponsePending) == 1;
+        var isManualInventoryResponse = !isSilentInventoryResponse
+            && Volatile.Read(ref _manualInventoryResponsePending) == 1;
+        IReadOnlyList<InventoryItem> inventory;
+        if (isSilentInventoryResponse)
         {
+            _hiddenInventoryResponse.Append(text);
+            var response = _hiddenInventoryResponse.ToString();
+            if (!response.Contains("Nosisz przy sobie:", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!ContainsPromptAfterMarker(response, "Nosisz przy sobie:")) return !ShowEquipmentScanResponses;
+            if (!EquipmentInventorySnapshotParser.TryParseInventory(response, out inventory)) return !ShowEquipmentScanResponses;
+
             Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
-            var previousInventory = _equipmentInventorySnapshot.Inventory;
-            _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Inventory = inventory };
-            PreserveInventoryMetadata(previousInventory, inventory);
-            WarnAboutLowDurability(_equipmentInventorySnapshot);
-            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
-            QueueEquipmentExamines();
-            return true;
+            _hiddenInventoryResponse.Clear();
         }
-        return false;
+        else if (isManualInventoryResponse && EquipmentInventorySnapshotParser.TryParseInventory(text, out inventory))
+        {
+            Interlocked.Exchange(ref _manualInventoryResponsePending, 0);
+        }
+        else
+        {
+            return false;
+        }
+
+        var mutationBatchCount = Interlocked.Exchange(ref _inventoryMutationBatchCount, 0);
+        var previousInventory = _equipmentInventorySnapshot.Inventory;
+        _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Inventory = inventory };
+        PreserveInventoryMetadata(previousInventory, inventory);
+        WarnAboutLowDurability(_equipmentInventorySnapshot);
+        Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+        _inventoryBatchRefreshAwaitingCompletion = isSilentInventoryResponse
+            && _inventoryBatchRefreshAnnounced && mutationBatchCount > 1;
+        _inventoryBatchRefreshAnnounced = false;
+        if (isManualInventoryResponse)
+        {
+            // A visible player "inv" is a reconciliation point, not a request to re-examine
+            // every equipped item. It also supersedes a stale background queue which may have
+            // been prepared before the player asked for the inventory listing.
+            _pendingEquipmentExamines.Clear();
+            _equipmentNamesToExamine = [];
+            _inventoryExaminePlan = InventoryExaminePlan.None;
+            _inventoryNamesToExamine.Clear();
+        }
+        if (_initialEquipmentLoadAnnounced && isManualInventoryResponse)
+        {
+            // The player deliberately reconciled inventory while the login scan was in flight.
+            // Continue only with tattoos/room work; do not restart an eq snapshot or its examines.
+            _initialEquipmentScanStage = InitialEquipmentScanStage.Tattoos;
+            _ = RequestSelfExamineAsync();
+        }
+        else if (_initialEquipmentLoadAnnounced && _initialEquipmentScanStage == InitialEquipmentScanStage.Inventory)
+        {
+            _initialEquipmentScanStage = InitialEquipmentScanStage.Equipment;
+            _ = RefreshEquipmentInventorySilentlyAsync();
+        }
+        else
+        {
+            QueueEquipmentExamines();
+        }
+        return isSilentInventoryResponse && !ShowEquipmentScanResponses;
     }
 
-    private void QueueEquipmentExamines()
+    private static bool ContainsPromptAfterMarker(string response, string marker)
+    {
+        var plain = AnsiText.StripKillerColors(AnsiText.StripAnsi(response));
+        var markerIndex = plain.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return markerIndex >= 0
+            && EquipmentInventorySnapshotParser.ContainsPrompt(plain[markerIndex..]);
+    }
+
+    private void QueueEquipmentExamines(bool includeEquipment = true, bool includeInventory = true)
     {
         _pendingEquipmentExamines.Clear();
-        for (var index = 0; index < _equipmentInventorySnapshot.Equipment.Count; index++)
+        if (includeEquipment)
         {
-            var item = _equipmentInventorySnapshot.Equipment[index];
-            if (_equipmentNamesToExamine is not null && !_equipmentNamesToExamine.Contains(AnsiText.StripKillerColors(AnsiText.StripAnsi(item.Name)))) continue;
-            var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, false, index);
-            _pendingEquipmentExamines.Enqueue(($"E:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+            for (var index = 0; index < _equipmentInventorySnapshot.Equipment.Count; index++)
+            {
+                var item = _equipmentInventorySnapshot.Equipment[index];
+                if (_equipmentNamesToExamine is not null && !_equipmentNamesToExamine.Contains(AnsiText.StripKillerColors(AnsiText.StripAnsi(item.Name)))) continue;
+                var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, false, index);
+                _pendingEquipmentExamines.Enqueue(($"E:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+            }
         }
-        foreach (var index in GetInventoryIndicesToExamine())
+        if (includeInventory)
         {
-            var item = _equipmentInventorySnapshot.Inventory[index];
-            var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, true, index);
-            _pendingEquipmentExamines.Enqueue(($"I:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+            foreach (var index in GetInventoryIndicesToExamine())
+            {
+                var item = _equipmentInventorySnapshot.Inventory[index];
+                var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, item.Name, true, index);
+                _pendingEquipmentExamines.Enqueue(($"I:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+            }
         }
-        _equipmentNamesToExamine = null;
-        _inventoryExaminePlan = InventoryExaminePlan.None;
-        _inventoryNamesToExamine.Clear();
-        _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
+        if (includeEquipment)
+        {
+            _equipmentNamesToExamine = null;
+        }
+        if (includeInventory)
+        {
+            _inventoryExaminePlan = InventoryExaminePlan.None;
+            _inventoryNamesToExamine.Clear();
+            _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
+        }
         _ = SendNextEquipmentExamineAsync();
     }
 
@@ -10381,6 +10855,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 .Where(entry => _inventoryNamesToExamine.Contains(EquipmentInventorySnapshotParser.GetPlainItemName(entry.item.Name)))
                 .Select(entry => entry.index),
             InventoryExaminePlan.NewItems => GetNewInventoryIndices(),
+            InventoryExaminePlan.NewItemsAndNamedItems => GetNewInventoryIndices()
+                .Concat(_equipmentInventorySnapshot.Inventory.Select((item, index) => (item, index))
+                    .Where(entry => _inventoryNamesToExamine.Contains(EquipmentInventorySnapshotParser.GetPlainItemName(entry.item.Name)))
+                    .Select(entry => entry.index))
+                .Distinct(),
             _ => []
         };
     }
@@ -10406,8 +10885,45 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void ApplyEquipmentInventoryPanel()
     {
-        EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _inventoryContainerContents, _tattoos);
+        EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _inventoryContainerContents, _containerAccessStates, _tattoos, _rareCategoriesByName);
         OnPropertyChanged(nameof(InventoryContainers));
+    }
+
+    private void SetGroundContainerAccessState(string key, ContainerAccessState state, string source)
+    {
+        if (!key.StartsWith("G:", StringComparison.Ordinal)) return;
+
+        var previous = _containerAccessStates.GetValueOrDefault(key);
+        _containerAccessStates[key] = state;
+        if (previous == state) return;
+
+        var name = int.TryParse(key.AsSpan(2), out var index)
+            && index >= 0 && index < _equipmentInventorySnapshot.GroundItems.Count
+            ? EquipmentInventorySnapshotParser.GetPlainItemName(_equipmentInventorySnapshot.GroundItems[index].Name)
+            : "nieznany kontener";
+        var label = state switch
+        {
+            ContainerAccessState.Open => "otwarte",
+            ContainerAccessState.Closed => "zamkniete",
+            ContainerAccessState.Locked => "zamkniete na klucz",
+            ContainerAccessState.MissingKey => "brak klucza",
+            _ => "nieznany"
+        };
+        Dispatcher.UIThread.Post(() => EmitSystem($"[Ekwipunek] Kontener: {name} — {label} ({source}).", 33));
+    }
+
+    private void TryLoadRareCategories()
+    {
+        try
+        {
+            _rareCategoriesByName = _rareCatalogStore.Load().Rares
+                .GroupBy(rare => EquipmentInventorySnapshotParser.GetPlainItemName(rare.Name), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Category, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+        {
+            _rareCategoriesByName = new(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private void PreserveInventoryMetadata(IReadOnlyList<InventoryItem> previous, IReadOnlyList<InventoryItem> current)
@@ -10453,32 +10969,191 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendNextEquipmentExamineAsync()
     {
-        if (!IsConnected || _activeEquipmentExamineKey is not null || _activeSelfExamine) return;
+        if (DeferEquipmentInventoryRefreshWhileFighting()) return;
+        if (!IsConnected || _activeEquipmentExamineKey is not null || _activeSelfExamine || _equipmentExamineSendPending) return;
         if (!_pendingEquipmentExamines.TryDequeue(out var request))
         {
+            if (_inventoryBatchRefreshAwaitingCompletion)
+            {
+                _inventoryBatchRefreshAwaitingCompletion = false;
+                Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] Zakończono aktualizację inventory.", 33));
+            }
+
+            // A room look requested by a take/drop must never overlap the follow-up examines
+            // for the freshly read inventory. Start it only after this queue is completely empty.
+            if (Interlocked.CompareExchange(ref _roomLookAfterInventoryRefreshPending, 0, 1) == 1)
+            {
+                _ = RequestRoomLookSilentlyAsync();
+                return;
+            }
+
+            // A session-start scan is a strict pipeline.  In particular, an old completed
+            // "examine self" must not cause the room scan to jump ahead of inventory.
+            if (_initialEquipmentLoadAnnounced)
+            {
+                switch (_initialEquipmentScanStage)
+                {
+                    case InitialEquipmentScanStage.EquipmentExamine:
+                        _initialEquipmentScanStage = InitialEquipmentScanStage.InventoryExamine;
+                        QueueEquipmentExamines(includeEquipment: false, includeInventory: true);
+                        return;
+
+                    case InitialEquipmentScanStage.InventoryExamine:
+                        _initialEquipmentScanStage = InitialEquipmentScanStage.Tattoos;
+                        await RequestSelfExamineAsync();
+                        return;
+
+                    case InitialEquipmentScanStage.GroundExamine:
+                        CompleteInitialEquipmentInventoryLoad();
+                        TryRefreshWeeklyRareList();
+                        return;
+
+                    // These stages are completed by their own server response handlers.
+                    // Do not infer completion from a stale flag or start a later action.
+                    case InitialEquipmentScanStage.Inventory:
+                    case InitialEquipmentScanStage.Equipment:
+                    case InitialEquipmentScanStage.Tattoos:
+                        return;
+                }
+            }
+
             await RequestSelfExamineAsync();
             return;
         }
-        _activeEquipmentExamineKey = request.Key;
-        _activeEquipmentExamineItemName = request.ItemName;
+        _equipmentExamineSendPending = true;
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected)
+            {
+                _equipmentExamineSendPending = false;
+                return;
+            }
+            _activeEquipmentExamineKey = request.Key;
+            _activeEquipmentExamineItemName = request.ItemName;
+            _activeEquipmentExamineResponse.Clear();
+            _activeEquipmentExaminePage.Clear();
+            _activeEquipmentExamineTriedWords.Clear();
+            _activeEquipmentExamineTriedWords.Add(GetCommandWord(request.Command));
+            _equipmentExamineSendPending = false;
+            if (ShowEquipmentExamineCommandEcho)
+            {
+                await _session.SendCommandAsync(request.Command);
+                await Dispatcher.UIThread.InvokeAsync(() => EmitSystem($"> [Ekwipunek] {request.Command}", 33));
+                return;
+            }
+            await _session.SendCommandAsync(request.Command);
+        }
+        catch
+        {
+            _equipmentExamineSendPending = false;
+            _activeEquipmentExamineKey = null;
+            _activeEquipmentExamineItemName = null;
+        }
+    }
+
+    private bool TryRetryActiveEquipmentExamineWithNextWord()
+    {
+        if (_activeEquipmentExamineKey is not { } key || string.IsNullOrWhiteSpace(_activeEquipmentExamineItemName)) return false;
+
+        var keyParts = key.Split(':', 2);
+        if (keyParts.Length != 2 || !int.TryParse(keyParts[1], out var index)) return false;
+        var nextWord = EquipmentInventorySnapshotParser.GetItemCommandWords(_activeEquipmentExamineItemName)
+            .FirstOrDefault(word => !_activeEquipmentExamineTriedWords.Contains(word));
+        if (string.IsNullOrWhiteSpace(nextWord)) return false;
+
+        var reference = keyParts[0] switch
+        {
+            "E" => EquipmentInventorySnapshotParser.ResolveItemCommandReferenceForWord(_equipmentInventorySnapshot, false, index, nextWord),
+            "I" => EquipmentInventorySnapshotParser.ResolveItemCommandReferenceForWord(_equipmentInventorySnapshot, true, index, nextWord),
+            "G" => EquipmentInventorySnapshotParser.ResolveGroundItemCommandReferenceForWord(_equipmentInventorySnapshot, index, nextWord),
+            _ => new ItemCommandReference(string.Empty, 1)
+        };
+        if (string.IsNullOrWhiteSpace(reference.Word)) return false;
+
+        _activeEquipmentExamineTriedWords.Add(nextWord);
         _activeEquipmentExamineResponse.Clear();
         _activeEquipmentExaminePage.Clear();
-        try { await Dispatcher.UIThread.InvokeAsync(() => EmitSystem($"> [Ekwipunek] {request.Command}", 33)); await _session.SendCommandAsync(request.Command); }
-        catch { _activeEquipmentExamineKey = null; _activeEquipmentExamineItemName = null; }
+        _ = SendActiveEquipmentExamineRetryAsync(EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference));
+        return true;
+    }
+
+    private async Task SendActiveEquipmentExamineRetryAsync(string command)
+    {
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected || _activeEquipmentExamineKey is null) return;
+            await _session.SendCommandAsync(command);
+            if (ShowEquipmentExamineCommandEcho)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => EmitSystem($"> [Ekwipunek] {command}", 33));
+            }
+        }
+        catch
+        {
+            _activeEquipmentExamineKey = null;
+            _activeEquipmentExamineItemName = null;
+            _activeEquipmentExamineResponse.Clear();
+            _activeEquipmentExaminePage.Clear();
+            _activeEquipmentExamineTriedWords.Clear();
+            _ = SendNextEquipmentExamineAsync();
+        }
+    }
+
+    private static string GetCommandWord(string command)
+    {
+        var argument = command.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty;
+        var separator = argument.IndexOf('.');
+        return separator >= 0 && separator + 1 < argument.Length ? argument[(separator + 1)..] : argument;
     }
 
     private async Task RequestSelfExamineAsync()
     {
+        if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || _selfExamineCompleted || _activeSelfExamine) return;
         _activeSelfExamine = true;
         _activeSelfExamineResponse.Clear();
-        try { await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] examine self", 33)); await _session.SendCommandAsync("examine self"); }
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected)
+            {
+                _activeSelfExamine = false;
+                _activeSelfExamineResponse.Clear();
+                return;
+            }
+            if (ShowEquipmentExamineCommandEcho)
+            {
+                await _session.SendCommandAsync("examine self");
+                await Dispatcher.UIThread.InvokeAsync(() => EmitSystem("> [Ekwipunek] examine self", 33));
+                return;
+            }
+            await _session.SendCommandAsync("examine self");
+        }
         catch { _activeSelfExamine = false; _activeSelfExamineResponse.Clear(); }
+    }
+
+    private void CompleteInitialEquipmentInventoryLoad()
+    {
+        if (!_initialEquipmentLoadAnnounced) return;
+
+        _initialEquipmentLoadAnnounced = false;
+        _initialEquipmentScanStage = InitialEquipmentScanStage.None;
+        // The initial look already reflects the current room, so a deferred parallel request
+        // would only repeat it and can be discarded.
+        Interlocked.Exchange(ref _roomLookAfterInitialLoadPending, 0);
+        Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] Zakończono ładowanie danych postaci.", 33));
     }
 
     private async Task SendEquipmentPagerContinueAsync()
     {
-        try { await _session.SendCommandAsync(string.Empty); }
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected) return;
+            await _session.SendCommandAsync(string.Empty);
+        }
         catch { _activeEquipmentExamineKey = null; _activeEquipmentExamineItemName = null; _activeEquipmentExamineResponse.Clear(); _activeEquipmentExaminePage.Clear(); }
     }
 
@@ -10499,8 +11174,136 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             || key.Contains("chwytasz ") && key.Contains(" w obie rece") || key.Contains("pewnie chwytasz ");
     }
 
+    /// <summary>Starts collecting the next visible room description, either after a confirmed
+    /// room change or the player's plain <c>look</c> command. The collector never owns terminal
+    /// output; it only copies it until the observed prompt terminator arrives.</summary>
+    private void BeginRoomGroundItemsCapture(bool silently = false)
+    {
+        lock (_roomGroundItemsLock)
+        {
+            _collectingRoomGroundItems = true;
+            _silentlyCollectingRoomGroundItems = silently;
+            _roomGroundItemsResponse.Clear();
+        }
+    }
+
+    private bool CaptureRoomGroundItems(string text)
+    {
+        string? response = null;
+        var suppressTerminal = false;
+        lock (_roomGroundItemsLock)
+        {
+            if (!_collectingRoomGroundItems)
+            {
+                return false;
+            }
+
+            suppressTerminal = _silentlyCollectingRoomGroundItems && !ShowEquipmentScanResponses;
+            _roomGroundItemsResponse.Append(text);
+            if (!EquipmentInventorySnapshotParser.ContainsPrompt(_roomGroundItemsResponse.ToString()))
+            {
+                return suppressTerminal;
+            }
+
+            response = _roomGroundItemsResponse.ToString();
+            _roomGroundItemsResponse.Clear();
+            _collectingRoomGroundItems = false;
+            _silentlyCollectingRoomGroundItems = false;
+        }
+
+        Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+        var people = _latestRoomPeople.Select(person => person.Name).ToArray();
+        var groundItems = EquipmentInventorySnapshotParser.ParseGroundItems(response, people);
+        foreach (var key in _equipmentExamineDescriptions.Keys.Where(key => key.StartsWith("G:", StringComparison.Ordinal)).ToArray())
+        {
+            _equipmentExamineDescriptions.Remove(key);
+        }
+        foreach (var key in _inventoryContainerContents.Keys.Where(key => key.StartsWith("G:", StringComparison.Ordinal)).ToArray())
+        {
+            _inventoryContainerContents.Remove(key);
+        }
+        foreach (var key in _containerAccessStates.Keys.Where(key => key.StartsWith("G:", StringComparison.Ordinal)).ToArray())
+        {
+            _containerAccessStates.Remove(key);
+        }
+        _equipmentInventorySnapshot = _equipmentInventorySnapshot with { Ground = groundItems };
+        Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+        if (_initialEquipmentLoadAnnounced && _initialEquipmentScanStage == InitialEquipmentScanStage.Room)
+        {
+            _initialEquipmentScanStage = InitialEquipmentScanStage.Inventory;
+            _ = RequestInventorySilentlyAsync();
+            return suppressTerminal;
+        }
+        if (Interlocked.Exchange(ref _inventoryRefreshAfterWakeRoomLookPending, 0) == 1)
+        {
+            // A wake-up look is the authoritative room snapshot. Only once it is complete may
+            // inventory be refreshed; this preserves one command/response conversation at a time.
+            _equipmentNamesToExamine = [];
+            _inventoryBeforeRefresh = _equipmentInventorySnapshot.Inventory;
+            _inventoryExaminePlan = InventoryExaminePlan.NewItems;
+            _inventoryNamesToExamine.Clear();
+            _ = RequestInventorySilentlyAsync();
+            return suppressTerminal;
+        }
+        QueueGroundContainerExamines();
+        return suppressTerminal;
+    }
+
+    private void QueueGroundContainerExamines()
+    {
+        if (AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition)) return;
+
+        foreach (var (item, index) in _equipmentInventorySnapshot.GroundItems.Select((item, index) => (item, index))
+            .Where(entry => EquipmentInventorySnapshotParser.IsPotentialGroundContainer(entry.item.Name)
+                || IsConfirmedGroundContainer(entry.item.Name)))
+        {
+            var reference = EquipmentInventorySnapshotParser.ResolveGroundItemCommandReference(_equipmentInventorySnapshot, item.Name, index);
+            _pendingEquipmentExamines.Enqueue(($"G:{index}", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), item.Name));
+        }
+
+        _ = SendNextEquipmentExamineAsync();
+    }
+
+    private bool IsConfirmedGroundContainer(string itemName)
+    {
+        var vnum = Map.CurrentVnum;
+        return !string.IsNullOrWhiteSpace(vnum)
+            && _confirmedGroundContainersByRoom.TryGetValue(vnum, out var names)
+            && names.Contains(EquipmentInventorySnapshotParser.GetPlainItemName(itemName));
+    }
+
+    private void RememberConfirmedGroundContainer(string itemName)
+    {
+        var vnum = Map.CurrentVnum;
+        var name = EquipmentInventorySnapshotParser.GetPlainItemName(itemName);
+        if (string.IsNullOrWhiteSpace(vnum) || string.IsNullOrWhiteSpace(name)) return;
+
+        if (!_confirmedGroundContainersByRoom.TryGetValue(vnum, out var names))
+        {
+            names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _confirmedGroundContainersByRoom[vnum] = names;
+        }
+
+        names.Add(name);
+    }
+
     private void OnTextReceived(string text)
     {
+        CompleteBulkInventoryActionAtPrompt(text);
+        ObserveOpponentDeathForRoomScan(text);
+        HandleInitialEquipmentLoadSleepState(text);
+        HandleWakeInventoryAndRoomRefresh(text);
+        // Text is delivered before its split LineReceived events.  Capture an open response here
+        // as well, otherwise a response and its prompt in one text block would set Succeeded too
+        // late for the prompt to trigger the follow-up examine.
+        CaptureGroundContainerAccessOutcome(text);
+        // A drop-triggered look owns its whole response before equipment examine capture can see
+        // it. Otherwise a pending examine could mistake room-description text for its result.
+        if (Volatile.Read(ref _hiddenRoomLookResponsePending) == 1 && CaptureRoomGroundItems(text))
+        {
+            RememberSilentEquipmentLines(text);
+            return;
+        }
         if (HandleEquipmentInventoryResponse(text))
         {
             RememberSilentEquipmentLines(text);
@@ -10510,6 +11313,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _rareCatalogRefreshCoordinator.ObserveText(text);
         _abilityMappingCoordinator.ObserveText(text);
         _artifactTryMappingCoordinator.ObserveText(text);
+        if (CaptureRoomGroundItems(text))
+        {
+            RememberSilentEquipmentLines(text);
+            return;
+        }
         CollectSpellKnowledge(text);
         CollectSkillKnowledge(text);
         var toDisplay = _profileSettings.ShowNumericDamageEnabled ? AnnotateDamageLines(text) : text;
@@ -10519,6 +11327,79 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         toDisplay = _profileSettings.AnnotateScoreEnabled ? AnnotateScoreLines(toDisplay) : toDisplay;
         toDisplay = AnnotateRoomVnum(toDisplay);
         Dispatcher.UIThread.Post(() => OutputReceived?.Invoke(toDisplay));
+        // Queue the initial scan only after the prompt text itself has been handed to the
+        // terminal, so its command echo can never visually precede the login prompt.
+        StartInitialEquipmentLoadAfterPrompt(text);
+        StartPostCombatRoomLookAfterPrompt(text);
+    }
+
+    private void ObserveOpponentDeathForRoomScan(string text)
+    {
+        if (!EquipmentInventorySnapshotParser.ContainsObservedOpponentDeath(text))
+        {
+            return;
+        }
+
+        // Text arrives before its LineReceived callbacks and before the matching prompt is
+        // processed below. Queue the same guarded post-combat scan used for a GMCP transition;
+        // this covers logs where the position update is delayed or absent.
+        _postCombatPromptObserved = false;
+        Interlocked.Exchange(ref _roomLookAfterCombatPromptPending, 1);
+    }
+
+    private void StartPostCombatRoomLookAfterPrompt(string text)
+    {
+        if (Volatile.Read(ref _roomLookAfterCombatPromptPending) == 0
+            || !EquipmentInventorySnapshotParser.ContainsPrompt(text))
+        {
+            return;
+        }
+
+        _postCombatPromptObserved = true;
+        SchedulePostCombatRoomLookIfGroupFinished();
+    }
+
+    private void SchedulePostCombatRoomLookIfGroupFinished()
+    {
+        if (Volatile.Read(ref _roomLookAfterCombatPromptPending) == 0
+            || !_postCombatPromptObserved
+            || _latestRoomPeople.Any(person => person.IsFighting))
+        {
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _postCombatRoomLookDelayCts, cancellation);
+        previous?.Cancel();
+        _ = RequestPostCombatRoomLookAfterDelayAsync(cancellation);
+    }
+
+    private async Task RequestPostCombatRoomLookAfterDelayAsync(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            // A companion's final GMCP update can precede the remaining death text.
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellation.Token);
+            if (cancellation.IsCancellationRequested
+                || !IsConnected
+                || _latestRoomPeople.Any(person => person.IsFighting)
+                || Interlocked.CompareExchange(ref _roomLookAfterCombatPromptPending, 0, 1) != 1)
+            {
+                return;
+            }
+
+            _postCombatPromptObserved = false;
+            await RequestRoomLookSilentlyAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer room/combat state superseded this delayed post-combat check.
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _postCombatRoomLookDelayCts, null, cancellation);
+            cancellation.Dispose();
+        }
     }
 
     /// <summary>
@@ -10720,13 +11601,29 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (!_isCollectingSpellList)
         {
             var (plain, indexes) = AnsiText.StripAnsiWithMap(chunk);
+            var hasSpellBookHeader = plain.Contains("Ksiega Zaklec", StringComparison.OrdinalIgnoreCase);
             var match = Regex.Match(plain, @"Kr[ąa]g\s+\d+:", RegexOptions.IgnoreCase);
-            if (!match.Success)
+            if (hasSpellBookHeader)
+            {
+                _awaitingSpellBookRows = true;
+            }
+
+            if (!_awaitingSpellBookRows || !match.Success)
+            {
+                // A response that ended before its first circle is not a complete spell book.
+                // Forget the header so it can never make an unrelated later "Krag" line vanish.
+                if (_awaitingSpellBookRows && EquipmentInventorySnapshotParser.ContainsPrompt(chunk))
+                {
+                    _awaitingSpellBookRows = false;
+                }
+
                 return chunk;
+            }
 
             var start = indexes[match.Index];
 
             _isCollectingSpellList = true;
+            _awaitingSpellBookRows = false;
             _pendingSpellList.Append(chunk[start..]);
             chunk = chunk[..start];
         }
@@ -10736,10 +11633,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             chunk = string.Empty;
         }
 
-        if (!_pendingSpellList.ToString().Contains("Aby sprawdzi", StringComparison.OrdinalIgnoreCase))
-            return chunk;
+        var captured = _pendingSpellList.ToString();
+        if (!captured.Contains("Aby sprawdzi", StringComparison.OrdinalIgnoreCase))
+        {
+            // Do not permanently consume terminal output when the expected spell-book footer is
+            // absent (for example after an interrupted server response).
+            if (!EquipmentInventorySnapshotParser.ContainsPrompt(captured))
+            {
+                return chunk;
+            }
 
-        var formatted = SpellListColumnFormatter.Format(_pendingSpellList.ToString(), Map.SpellMobCatalog);
+            _pendingSpellList.Clear();
+            _isCollectingSpellList = false;
+            return captured;
+        }
+
+        var formatted = SpellListColumnFormatter.Format(captured, Map.SpellMobCatalog);
         _pendingSpellList.Clear();
         _isCollectingSpellList = false;
         return chunk + formatted;
@@ -10852,7 +11761,29 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
         else if (_equipmentInventoryCheckedForSession && EquipmentInventorySnapshotParser.GetInventoryMutationKind(line) is { } inventoryMutation)
         {
+            if (++_inventoryMutationBatchCount == 2)
+            {
+                _inventoryBatchRefreshAnnounced = true;
+                Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] Trwa aktualizacja inventory.", 33));
+            }
+            if (inventoryMutation == InventoryMutationKind.Added
+                && EquipmentInventorySnapshotParser.TryGetPickedUpItemName(line, out var pickedUpItem))
+            {
+                RemovePickedUpGroundItem(pickedUpItem);
+            }
+            if (EquipmentInventorySnapshotParser.IsGroundDropMessage(line))
+            {
+                Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
+            }
             RefreshInventoryAfterMutation(inventoryMutation);
+        }
+        else if (_equipmentInventoryCheckedForSession
+            && EquipmentInventorySnapshotParser.IsItemDisintegrationMessage(line))
+        {
+            // The game does not identify the source of a disintegration notice. Reconcile the
+            // carried list first and then the room list, without assuming which copy vanished.
+            Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
+            RefreshInventoryAfterMutation(InventoryMutationKind.Removed);
         }
 
         if (ExperienceStatisticsEnabled && _statisticsCharacterName is not null)
@@ -10984,6 +11915,136 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         return SendCommandAsync(EquipmentInventorySnapshotParser.BuildItemCommand(action, row.CommandReference));
     }
 
+    private Task ExecuteGroundContainerAccessAsync(EquipmentInventoryRow? row, GroundContainerAccessAction action)
+    {
+        if (row is null) return Task.CompletedTask;
+
+        var index = EquipmentInventory.GroundItems.IndexOf(row);
+        if (index < 0) return Task.CompletedTask;
+
+        _pendingGroundContainerAccess = ($"G:{index}", row.Name, action, false);
+        var command = action switch
+        {
+            GroundContainerAccessAction.Open => "open",
+            GroundContainerAccessAction.Unlock => "unlock",
+            GroundContainerAccessAction.Close => "close",
+            _ => "lock"
+        };
+        return ExecuteEquipmentItemCommandAsync(row, command);
+    }
+
+    /// <summary>Records only explicit server acknowledgements for the context-menu open/unlock
+    /// action.  A successful open is followed by a single examine after its prompt, so the
+    /// contents are read from the server rather than guessed.</summary>
+    private void CaptureGroundContainerAccessOutcome(string line)
+    {
+        // Prefer the name returned by the server. This covers arbitrary aliases and abbreviations.
+        // The remembered command target remains necessary only for generic failures without a name.
+        if (EquipmentInventorySnapshotParser.TryGetContainerOperationOutcome(line, out var outcome, out var serverName)
+            && EquipmentInventorySnapshotParser.TryResolveGroundContainerIndexFromServerName(_equipmentInventorySnapshot, serverName, out var resolvedIndex))
+        {
+            var action = outcome switch
+            {
+                ContainerOperationOutcome.Opened => GroundContainerAccessAction.Open,
+                ContainerOperationOutcome.Unlocked => GroundContainerAccessAction.Unlock,
+                ContainerOperationOutcome.Closed => GroundContainerAccessAction.Close,
+                _ => GroundContainerAccessAction.Lock
+            };
+            _pendingGroundContainerAccess = ($"G:{resolvedIndex}", _equipmentInventorySnapshot.GroundItems[resolvedIndex].Name, action, false);
+        }
+
+        if (_pendingGroundContainerAccess is not { } pending) return;
+
+        if (pending.Action == GroundContainerAccessAction.Open)
+        {
+            if (EquipmentInventorySnapshotParser.IsContainerLockedMessage(line))
+            {
+                SetGroundContainerAccessState(pending.Key, ContainerAccessState.Locked, "open");
+                _pendingGroundContainerAccess = null;
+                Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+                return;
+            }
+            if (EquipmentInventorySnapshotParser.IsContainerOpenedMessage(line))
+            {
+                _inventoryContainerContents[pending.Key] = [];
+                SetGroundContainerAccessState(pending.Key, ContainerAccessState.Open, "open; pobieram zawartość");
+                pending = pending with { Succeeded = true };
+                _pendingGroundContainerAccess = pending;
+                Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+            }
+        }
+        else if (pending.Action == GroundContainerAccessAction.Unlock)
+        {
+            if (EquipmentInventorySnapshotParser.IsContainerKeyMissingMessage(line))
+            {
+                SetGroundContainerAccessState(pending.Key, ContainerAccessState.MissingKey, "unlock");
+                _pendingGroundContainerAccess = null;
+                Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+                return;
+            }
+            if (EquipmentInventorySnapshotParser.IsContainerUnlockedMessage(line))
+            {
+                SetGroundContainerAccessState(pending.Key, ContainerAccessState.Closed, "unlock");
+                _pendingGroundContainerAccess = null;
+                Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+                return;
+            }
+        }
+        else if (pending.Action == GroundContainerAccessAction.Close
+            && EquipmentInventorySnapshotParser.IsContainerClosedMessage(line))
+        {
+            SetGroundContainerAccessState(pending.Key, ContainerAccessState.Closed, "close");
+            _pendingGroundContainerAccess = null;
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+            return;
+        }
+        else if (EquipmentInventorySnapshotParser.IsContainerLockedByKeyMessage(line))
+        {
+            SetGroundContainerAccessState(pending.Key, ContainerAccessState.Locked, "lock");
+            _pendingGroundContainerAccess = null;
+            Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+            return;
+        }
+
+        if (!EquipmentInventorySnapshotParser.ContainsPrompt(line)) return;
+
+        _pendingGroundContainerAccess = null;
+        if (!pending.Succeeded) return;
+
+        if (!int.TryParse(pending.Key.AsSpan(2), out var index)
+            || index < 0 || index >= _equipmentInventorySnapshot.GroundItems.Count) return;
+        var current = _equipmentInventorySnapshot.GroundItems[index];
+        var reference = EquipmentInventorySnapshotParser.ResolveGroundItemCommandReference(_equipmentInventorySnapshot, current.Name, index);
+        _pendingEquipmentExamines.Enqueue((pending.Key, EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference), current.Name));
+        _ = SendNextEquipmentExamineAsync();
+    }
+
+    private async Task ExecuteEquipmentExamineAndRefreshAsync(EquipmentInventoryRow? row)
+    {
+        if (row is null) return;
+
+        _equipmentNamesToExamine = [AnsiText.StripKillerColors(AnsiText.StripAnsi(row.Name))];
+        _inventoryExaminePlan = InventoryExaminePlan.None;
+        await RefreshEquipmentInventorySilentlyAsync();
+    }
+
+    private async Task ExecuteInventoryExamineAndRefreshAsync(EquipmentInventoryRow? row)
+    {
+        if (row is null) return;
+
+        PlanInventoryExamines(row.Name);
+        await RequestInventorySilentlyAsync();
+    }
+
+    private async Task ExecuteInventoryItemCommandAndRefreshAsync(EquipmentInventoryRow? row, string action)
+    {
+        if (row is null) return;
+
+        await ExecuteEquipmentItemCommandAsync(row, action);
+        PlanInventoryExamines(row.Name);
+        await RequestInventorySilentlyAsync();
+    }
+
     private Task ExecuteInventorySpellIdentifyAsync(EquipmentInventoryRow? row)
     {
         if (row is null || !CanIdentifyItemsWithSpell)
@@ -10998,6 +12059,19 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         return SendCommandAsync(EquipmentInventorySnapshotParser.BuildItemCommand("cast 'identify'", row.CommandReference));
+    }
+
+    private async Task ExecuteInventorySpellIdentifyAndRefreshAsync(EquipmentInventoryRow? row)
+    {
+        if (row is null || CurrentIdentifySpellState != IdentifySpellState.Ready)
+        {
+            await ExecuteInventorySpellIdentifyAsync(row);
+            return;
+        }
+
+        await ExecuteInventorySpellIdentifyAsync(row);
+        PlanInventoryExamines(row.Name);
+        await RequestInventorySilentlyAsync();
     }
 
     public void GiveInventoryItem(EquipmentInventoryRow? item, RoomPerson? recipient)
@@ -11021,6 +12095,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _ = SendCommandAsync($"put {item.CommandReference.Argument} {container.CommandReference.Argument}");
     }
 
+    public void PutInventoryGroupIntoContainer(ItemBulkGroup? group, EquipmentInventoryRow? container)
+    {
+        if (group is null || container is null || group.Count < 2) return;
+
+        PlanInventoryExamines(container.Name);
+        _ = SendBulkInventoryCommandAsync($"put {group.CommandArgument} {container.CommandReference.Argument}");
+    }
+
     public void TakeContainerItem(EquipmentInventoryRow? container, ContainerInventoryItem? item)
     {
         if (container is null || item is null)
@@ -11031,6 +12113,51 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         PlanInventoryExamines(container.Name, item.Name);
         _ = SendCommandAsync($"take {item.CommandReference.Argument} {container.CommandReference.Argument}");
     }
+
+    public void TakeContainerItemGroup(EquipmentInventoryRow? container, ItemBulkGroup? group)
+    {
+        if (container is null || group is null || group.Count < 2) return;
+
+        PlanInventoryExamines([container.Name, .. group.ItemNames]);
+        _ = SendBulkInventoryCommandAsync($"take {group.CommandArgument} {container.CommandReference.Argument}");
+    }
+
+    public void TakeGroundContainerItem(EquipmentInventoryRow? container, ContainerInventoryItem? item)
+    {
+        if (container is null || item is null)
+        {
+            return;
+        }
+
+        PlanInventoryExamines(item.Name);
+        // The room listing is the authoritative source for a ground container's remaining
+        // contents, so refresh it only after the successful inventory response.
+        Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
+        _ = SendCommandAsync($"take {item.CommandReference.Argument} {container.CommandReference.Argument}");
+    }
+
+    public void TakeGroundContainerItemGroup(EquipmentInventoryRow? container, ItemBulkGroup? group)
+    {
+        if (container is null || group is null || group.Count < 2) return;
+
+        PlanInventoryExamines(group.ItemNames.ToArray());
+        Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
+        _ = SendBulkInventoryCommandAsync($"take {group.CommandArgument} {container.CommandReference.Argument}");
+    }
+
+    private Task ExecuteGroundBulkTakeAsync(ItemBulkGroup? group)
+    {
+        if (group is null || group.Count < 2) return Task.CompletedTask;
+
+        PlanInventoryExamines(group.ItemNames.ToArray());
+        return SendBulkInventoryCommandAsync($"take {group.CommandArgument}");
+    }
+
+    private Task ExecuteInventoryBulkDropAsync(ItemBulkGroup? group) =>
+        group is null || group.Count < 2 ? Task.CompletedTask : SendBulkInventoryCommandAsync($"drop {group.CommandArgument}");
+
+    private Task ExecuteInventoryBulkSellAsync(ItemBulkGroup? group) =>
+        group is null || group.Count < 2 ? Task.CompletedTask : SendBulkInventoryCommandAsync($"sell {group.CommandArgument}");
 
     private void PlanInventoryExamines(params string[] itemNames)
     {
@@ -11051,32 +12178,101 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void RememberContainerCommand(string command)
     {
         var parts = command.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (TryRememberGroundContainerAccessCommand(parts)) return;
         if (parts.Length < 3) return;
         var verb = parts[0];
         if (!string.Equals(verb, "put", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(verb, "take", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(verb, "tak", StringComparison.OrdinalIgnoreCase)) return;
 
-        var container = _equipmentInventorySnapshot.Inventory
+        int? containerIndex = _equipmentInventorySnapshot.Inventory
             .Select((item, index) => (item, index))
-            .FirstOrDefault(entry => string.Equals(
+            .Where(entry => string.Equals(
                 EquipmentInventorySnapshotParser.ResolveItemCommandReference(_equipmentInventorySnapshot, entry.item.Name, true, entry.index).Argument,
-                parts[2], StringComparison.OrdinalIgnoreCase));
-        if (container.item is null) return;
+                parts[2], StringComparison.OrdinalIgnoreCase))
+            .Select(entry => (int?)entry.index)
+            .FirstOrDefault();
+        if (containerIndex is null)
+        {
+            if (!EquipmentInventorySnapshotParser.TryResolveInventoryItemIndex(_equipmentInventorySnapshot, parts[2], out var resolvedIndex))
+            {
+                return;
+            }
+
+            containerIndex = resolvedIndex;
+        }
+
+        var container = _equipmentInventorySnapshot.Inventory[containerIndex.Value];
 
         if (string.Equals(verb, "put", StringComparison.OrdinalIgnoreCase))
         {
-            PlanInventoryExamines(container.item.Name);
+            PlanInventoryExamines(container.Name);
             return;
         }
 
-        var containerKey = $"I:{container.index}";
+        var containerKey = $"I:{containerIndex.Value}";
         var content = _inventoryContainerContents.TryGetValue(containerKey, out var contents)
             ? contents.Select((item, index) => (item, index)).FirstOrDefault(entry => string.Equals(
                 EquipmentInventorySnapshotParser.ResolveItemCommandReference(new EquipmentInventorySnapshot([], contents), entry.item.Name, true, entry.index).Argument,
                 parts[1], StringComparison.OrdinalIgnoreCase))
             : default;
-        PlanInventoryExamines(container.item.Name, content.item?.Name ?? string.Empty);
+        PlanInventoryExamines(container.Name, content.item?.Name ?? string.Empty);
+    }
+
+    private bool TryRememberGroundContainerAccessCommand(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 2) return false;
+        if (!TryGetGroundContainerAccessAction(parts[0], out var action)) return false;
+
+        var match = _equipmentInventorySnapshot.GroundItems
+            .Select((item, index) => (item, index))
+            .FirstOrDefault(entry => string.Equals(
+                EquipmentInventorySnapshotParser.ResolveGroundItemCommandReference(_equipmentInventorySnapshot, entry.item.Name, entry.index).Argument,
+                parts[1], StringComparison.OrdinalIgnoreCase));
+        if (match.item is null)
+        {
+            if (!EquipmentInventorySnapshotParser.TryResolveGroundItemIndex(_equipmentInventorySnapshot, parts[1], out var resolvedIndex)) return false;
+            match = (_equipmentInventorySnapshot.GroundItems[resolvedIndex], resolvedIndex);
+        }
+
+        // The outgoing word may be a server-supported abbreviation ("un", "unl", "ku").
+        // Never change the panel here: it is changed only by the subsequent server response.
+        _pendingGroundContainerAccess = ($"G:{match.index}", match.item.Name, action, false);
+        return true;
+    }
+
+    private static bool TryGetGroundContainerAccessAction(string verb, out GroundContainerAccessAction action)
+    {
+        var normalized = verb.Trim().ToLowerInvariant();
+        if (normalized.Length < 2)
+        {
+            action = default;
+            return false;
+        }
+
+        if ("open".StartsWith(normalized, StringComparison.Ordinal))
+        {
+            action = GroundContainerAccessAction.Open;
+            return true;
+        }
+        if ("unlock".StartsWith(normalized, StringComparison.Ordinal))
+        {
+            action = GroundContainerAccessAction.Unlock;
+            return true;
+        }
+        if ("lock".StartsWith(normalized, StringComparison.Ordinal))
+        {
+            action = GroundContainerAccessAction.Lock;
+            return true;
+        }
+        if ("close".StartsWith(normalized, StringComparison.Ordinal))
+        {
+            action = GroundContainerAccessAction.Close;
+            return true;
+        }
+
+        action = default;
+        return false;
     }
 
     private bool ConsumeSilentEquipmentLine(string line)
@@ -11281,6 +12477,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         if (nowFighting && !wasFighting)
         {
+            _equipmentInventorySnapshotBeforeCombat = _equipmentInventorySnapshot;
+            _equipmentInventoryRefreshDeferredDuringCombat = false;
             OnAutowalkCombatStarted();
             _autoAssistNpcPending = true;
             TryAutoAssistNpcIfConfirmed();
@@ -11320,6 +12518,19 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (wasFighting && !nowFighting)
         {
             _autoAssistNpcPending = false;
+            TryRefreshWeeklyRareList();
+            // A completed fight can leave bodies or loose loot in the room. Keep the look behind
+            // any deferred eq/inv pass so the two silent response captures never overlap.
+            if (_equipmentInventoryRefreshDeferredDuringCombat)
+            {
+                Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
+            }
+            else
+            {
+                _postCombatPromptObserved = false;
+                Interlocked.Exchange(ref _roomLookAfterCombatPromptPending, 1);
+            }
+            RefreshDeferredEquipmentInventoryAfterCombat();
             Dispatcher.UIThread.Post(() => CombatStateChanged?.Invoke(false));
         }
 
@@ -11781,6 +12992,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void OnCharacterVitalsChanged(CharacterVitalsUpdate update)
     {
+        ScheduleWeeklyRareListRefresh();
         if (update.Name is { } newCharacterName
             && _latestCharacterName is { } previousCharacterName
             && !string.Equals(previousCharacterName, newCharacterName, StringComparison.OrdinalIgnoreCase))
@@ -11790,7 +13002,41 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (!_equipmentInventoryCheckedForSession)
         {
             _equipmentInventoryCheckedForSession = true;
-            _ = RefreshEquipmentInventorySilentlyAsync();
+            _initialEquipmentLoadAnnounced = true;
+            _initialEquipmentLoadPending = true;
+            // A reconnect can retain the view model.  The next startup scan must therefore
+            // not inherit a completed self-examine from the previous character/session.
+            _selfExamineCompleted = false;
+            _activeSelfExamine = false;
+            _activeSelfExamineResponse.Clear();
+            // The first eq reply belongs to the new session. No incomplete examine or room
+            // capture from before the character prompt may consume it.
+            _pendingEquipmentExamines.Clear();
+            _activeEquipmentExamineKey = null;
+            _activeEquipmentExamineItemName = null;
+            _activeEquipmentExamineResponse.Clear();
+            _activeEquipmentExaminePage.Clear();
+            Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
+            Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+            _hiddenEquipmentResponse.Clear();
+            _hiddenInventoryResponse.Clear();
+            Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+            lock (_roomGroundItemsLock)
+            {
+                _collectingRoomGroundItems = false;
+                _silentlyCollectingRoomGroundItems = false;
+                _roomGroundItemsResponse.Clear();
+            }
+            _initialEquipmentScanStage = InitialEquipmentScanStage.None;
+            // A reconnect does not always raise ConnectionClosed. Drop room work deferred by
+            // the preceding session (notably a post-combat look), otherwise its first login
+            // prompt can race the new eq -> inv startup pipeline.
+            Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 0);
+            Interlocked.Exchange(ref _roomLookAfterInitialLoadPending, 0);
+            Interlocked.Exchange(ref _roomLookAfterCombatPromptPending, 0);
+            _postCombatPromptObserved = false;
+            Interlocked.Exchange(ref _postCombatRoomLookDelayCts, null)?.Cancel();
+            Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] TRWA ŁADOWANIE EKWIPUNKU GRACZA. Proszę nic nie robić i czekać na komunikat o zakończeniu! Dziękuję.", 33));
         }
         if (update.Mv is { } movement) _latestMovement = movement;
         if (update.MaxMv is { } maximumMovement) _latestMaximumMovement = maximumMovement;
@@ -11850,6 +13096,155 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // thread (see OnSkillTimeoutsChanged).
             TryAutoFarmCombatHeal();
         });
+    }
+
+    private void StartInitialEquipmentLoadAfterPrompt(string text)
+    {
+        if (_initialEquipmentLoadPausedForSleep || !_initialEquipmentLoadPending || !EquipmentInventorySnapshotParser.ContainsPrompt(text)) return;
+        _initialEquipmentLoadPending = false;
+        _initialEquipmentScanStage = InitialEquipmentScanStage.Room;
+        _ = RequestRoomLookSilentlyAsync(afterInitialEquipmentLoad: true);
+    }
+
+    /// <summary>Equipment commands issued while the character sleeps return no usable snapshots.
+    /// Discard that partial conversation and restart from the room stage only after the server
+    /// confirms that the character has woken and supplied its following prompt.</summary>
+    private void HandleInitialEquipmentLoadSleepState(string text)
+    {
+        if (!_initialEquipmentLoadPausedForSleep
+            && _initialEquipmentLoadAnnounced
+            && EquipmentInventorySnapshotParser.IsSleepingCharacterResponse(text))
+        {
+            _initialEquipmentLoadPausedForSleep = true;
+            _initialEquipmentLoadPending = false;
+            _initialEquipmentScanStage = InitialEquipmentScanStage.None;
+            _pendingEquipmentExamines.Clear();
+            _activeEquipmentExamineKey = null;
+            _activeEquipmentExamineItemName = null;
+            _activeEquipmentExamineResponse.Clear();
+            _activeEquipmentExaminePage.Clear();
+            _activeSelfExamine = false;
+            _activeSelfExamineResponse.Clear();
+            Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
+            Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+            _hiddenEquipmentResponse.Clear();
+            _hiddenInventoryResponse.Clear();
+            Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
+            lock (_roomGroundItemsLock)
+            {
+                _collectingRoomGroundItems = false;
+                _silentlyCollectingRoomGroundItems = false;
+                _roomGroundItemsResponse.Clear();
+            }
+            Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] Odczyt wstrzymany: postać śpi. Wznowię go po komunikacie o obudzeniu.", 33));
+            return;
+        }
+
+        if (!_initialEquipmentLoadPausedForSleep
+            || !EquipmentInventorySnapshotParser.IsWakeUpMessage(text)
+            || !EquipmentInventorySnapshotParser.ContainsPrompt(text)) return;
+
+        _initialEquipmentLoadPausedForSleep = false;
+        _initialEquipmentScanStage = InitialEquipmentScanStage.Room;
+        _ = RequestRoomLookSilentlyAsync(afterInitialEquipmentLoad: true);
+    }
+
+    private void HandleWakeInventoryAndRoomRefresh(string text)
+    {
+        // The login-specific wake-up path already restarts its full serial scan. During an
+        // ordinary session, a character may have received items while asleep, so obtain a fresh
+        // room snapshot and then inventory without reopening the Equipment examine queue.
+        if (_initialEquipmentLoadAnnounced
+            || !EquipmentInventorySnapshotParser.IsWakeUpMessage(text)
+            || !EquipmentInventorySnapshotParser.ContainsPrompt(text)) return;
+
+        Interlocked.Exchange(ref _inventoryRefreshAfterWakeRoomLookPending, 1);
+        _ = RequestRoomLookSilentlyAsync();
+    }
+
+    private void ScheduleWeeklyRareListRefresh()
+    {
+        if (_weeklyRareRefreshChecked || _rareRefreshCts is not null || !IsConnected) return;
+        _weeklyRareRefreshChecked = true;
+        try
+        {
+            _weeklyRareRefreshPending = _rareCatalogStore.Load().GeneratedAtUtc is not { } generated
+                || DateTimeOffset.UtcNow - generated >= TimeSpan.FromDays(7);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+        {
+            _weeklyRareRefreshPending = true;
+        }
+        TryRefreshWeeklyRareList();
+    }
+
+    private void TryRefreshWeeklyRareList()
+    {
+        if (!_weeklyRareRefreshPending || _weeklyRareRefreshStartScheduled || _rareRefreshCts is not null || !IsConnected
+            || !_selfExamineCompleted
+            || Volatile.Read(ref _hiddenEquipmentResponsePending) != 0
+            || Volatile.Read(ref _hiddenInventoryResponsePending) != 0
+            || Volatile.Read(ref _hiddenRoomLookResponsePending) != 0
+            || _activeEquipmentExamineKey is not null
+            || AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition)) return;
+        _weeklyRareRefreshStartScheduled = true;
+        _ = RefreshRareListAfterEquipmentGapAsync();
+    }
+
+    private async Task RefreshRareListAfterEquipmentGapAsync()
+    {
+        try
+        {
+            await Task.Delay(EquipmentScanCommandGap);
+            if (!IsConnected
+                || !_selfExamineCompleted
+                || Volatile.Read(ref _hiddenEquipmentResponsePending) != 0
+                || Volatile.Read(ref _hiddenInventoryResponsePending) != 0
+                || Volatile.Read(ref _hiddenRoomLookResponsePending) != 0
+                || _activeEquipmentExamineKey is not null
+                || AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition))
+            {
+                return;
+            }
+
+            _weeklyRareRefreshPending = false;
+            await RefreshRareListAsync();
+        }
+        finally
+        {
+            _weeklyRareRefreshStartScheduled = false;
+        }
+    }
+
+    private async Task RefreshRareListAsync()
+    {
+        var cancellation = new CancellationTokenSource();
+        _rareRefreshCts = cancellation;
+        try
+        {
+            await _triggerSendLock.WaitAsync(cancellation.Token);
+            try
+            {
+                var progress = new Progress<RareCatalogRefreshProgress>(item => Dispatcher.UIThread.Post(() => EmitSystem($"[Rarelist] {item.DisplayText}", 33)));
+                var catalog = await _rareCatalogRefreshCoordinator.RefreshListAsync(
+                    async (command, token) =>
+                    {
+                        await _session.SendCommandAsync(command, token);
+                        var displayedCommand = string.IsNullOrEmpty(command) ? "[Enter]" : command;
+                        await Dispatcher.UIThread.InvokeAsync(() => EmitSystem($"> [Ekwipunek] {displayedCommand}", 33));
+                    },
+                    progress,
+                    cancellation.Token);
+                await _rareCatalogStore.SaveAsync(catalog, cancellation.Token);
+                TryLoadRareCategories();
+                Dispatcher.UIThread.Post(() => EmitSystem($"[Rarelist] Zakończono — zapisano {catalog.Rares.Count} przedmiotów.", 33));
+                Dispatcher.UIThread.Post(ApplyEquipmentInventoryPanel);
+            }
+            finally { _triggerSendLock.Release(); }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { Dispatcher.UIThread.Post(() => EmitSystem($"[Rarelist] Błąd: {exception.Message}", 31)); }
+        finally { _rareRefreshCts = null; cancellation.Dispose(); }
     }
 
     /// <summary>Reacts to every single Char.Vitals update while auto-farm is running, not just
@@ -12038,7 +13433,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void OnRoomPeopleChanged(IReadOnlyList<RoomPerson> people)
     {
         _latestRoomPeople = people.ToArray();
-        Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(InventoryGiveTargets)));
+        SchedulePostCombatRoomLookIfGroupFinished();
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(InventoryGiveTargets));
+            OnPropertyChanged(nameof(HasInventoryGiveTargets));
+        });
         if (ExperienceStatisticsEnabled && !string.IsNullOrWhiteSpace(_latestCharacterName))
         {
             var combatOpponents = GetStatisticsCombatOpponents(people);
@@ -12538,12 +13938,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         Interlocked.Exchange(ref _lastCommandSentTimestamp, Stopwatch.GetTimestamp());
         var verb = command.TrimStart().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
-        if (command.Length > 0 && !string.Equals(verb, "eq", StringComparison.OrdinalIgnoreCase) && !string.Equals(verb, "inv", StringComparison.OrdinalIgnoreCase)
-            && !verb.Equals("examine", StringComparison.OrdinalIgnoreCase))
+        if ((verb.Equals("inv", StringComparison.OrdinalIgnoreCase)
+             || verb.Equals("inventory", StringComparison.OrdinalIgnoreCase))
+            && Volatile.Read(ref _hiddenInventoryResponsePending) == 0)
         {
-            Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
-            Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
+            // The automatic refresh sets its pending flag before it sends "inv". If it is not
+            // set, this is the player's visible command and its response can reconcile the panel.
+            Interlocked.Exchange(ref _manualInventoryResponsePending, 1);
         }
+        // A player can issue an order immediately after a background eq/inv request. Do not
+        // clear its pending flag here: server replies remain ordered and the already sent silent
+        // response must still update the panel rather than leak into the terminal.
         if (_settings.SmartBuffTrackingEnabled && _buffCharacter is not null)
         {
             lock (_buffTrackingLock)
@@ -12875,6 +14280,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void OnConnectionClosed()
     {
+        _weeklyRareRefreshChecked = false;
+        _weeklyRareRefreshPending = false;
+        _weeklyRareRefreshStartScheduled = false;
         ResetEquipmentInventoryForCharacter();
         _ = StopCombatCaptureAfterConnectionClosedAsync();
         EndBuffTrackingSession(BuffMeasurementEndReason.SessionEnded);
@@ -13196,6 +14604,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Exchange(ref _inventoryMutationRefreshCts, null)?.Cancel();
         await _buffForecastTimers.DisposeAsync();
         EndBuffTrackingSession(BuffMeasurementEndReason.SessionEnded);
         SaveActiveProfile();

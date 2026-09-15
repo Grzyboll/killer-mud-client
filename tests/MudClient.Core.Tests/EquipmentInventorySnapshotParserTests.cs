@@ -5,6 +5,67 @@ namespace MudClient.Core.Tests;
 public sealed class EquipmentInventorySnapshotParserTests
 {
     [Fact]
+    public void RandomItemCatalogKeepsServerExtractedNamesByWearLocation()
+    {
+        var categories = RandomItemNameCatalog.NamesByCategory;
+
+        Assert.Equal(16, categories.Count);
+        Assert.Contains("szafir", RandomItemNameCatalog.GetNames(RandomItemCategory.Gem));
+        Assert.Contains("kolczyk", RandomItemNameCatalog.GetNames(RandomItemCategory.Ear));
+        Assert.Contains("nagolenniki", RandomItemNameCatalog.GetNames(RandomItemCategory.Legs));
+        Assert.Contains("bransoletka", RandomItemNameCatalog.GetNames(RandomItemCategory.Wrist));
+        Assert.Contains("jablko", RandomItemNameCatalog.GetNames(RandomItemCategory.Food));
+        Assert.All(categories.Values, names => Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count()));
+    }
+
+    [Fact]
+    public void RandomItemCatalogLabelsOnlyUnambiguousDisplayedNames()
+    {
+        Assert.Equal("gem", RandomItemNameCatalog.GetPolishSlotLabel("szafir gwiazdzisty"));
+        Assert.Equal("twarz", RandomItemNameCatalog.GetPolishSlotLabel("maska Szczurze Oblicze"));
+        Assert.Equal("jedzenie", RandomItemNameCatalog.GetPolishSlotLabel("jablko"));
+        Assert.Equal("nadgarstek", RandomItemNameCatalog.GetPolishSlotLabel("bransoleta z ametystem"));
+        Assert.Equal(string.Empty, RandomItemNameCatalog.GetPolishSlotLabel("kamien ksiezycowy"));
+    }
+
+    [Fact]
+    public void RandomItemCatalogBuildsObservedBulkCommandsForExactTypeGemsAndJewellery()
+    {
+        var groups = RandomItemNameCatalog.GetBulkGroups([
+            "srebrny kolczyk", "zloty kolczyk", "bransoleta z ametystem",
+            "szafir gwiazdzisty", "rubin"
+        ]);
+
+        Assert.Contains(groups, group => group.CommandArgument == "all.kolczyk" && group.Count == 2);
+        Assert.Contains(groups, group => group.CommandArgument == "all.klejnot" && group.Count == 2);
+        Assert.Contains(groups, group => group.CommandArgument == "all.gem" && group.Count == 3);
+    }
+
+    [Fact]
+    public void RandomItemCatalogShowsBulkActionsOnlyForTheSelectedItemsGroup()
+    {
+        var groups = RandomItemNameCatalog.GetBulkGroups(
+            ["srebrny kolczyk", "zloty kolczyk", "brazowa bransoleta"],
+            "brazowa bransoleta");
+
+        var group = Assert.Single(groups);
+        Assert.Equal("all.gem", group.CommandArgument);
+        Assert.Equal(3, group.Count);
+    }
+
+    [Theory]
+    [InlineData("gigantyczny tatuaz ukazujacy rune zniszczenia", "gigantyczny tatuaz reprezetujacy golema stali", "all.tatuaz")]
+    [InlineData("tajemniczy kamien mocy", "zagadkowy kamien mocy", "all.kamien")]
+    public void RandomItemCatalogBuildsExactFallbackGroupForRepeatedNounOutsideCatalog(string first, string second, string command)
+    {
+        var groups = RandomItemNameCatalog.GetBulkGroups([first, second], first);
+
+        var group = Assert.Single(groups);
+        Assert.Equal(command, group.CommandArgument);
+        Assert.Equal(2, group.Count);
+    }
+
+    [Fact]
     public void ParsesOnlyConfirmedEquipmentTableRows()
     {
         const string text = "nie jest to ekwipunek\nUzywasz:\n<pierwsza bron> miecz\n<uzywane jako tarcza> tarcza\n";
@@ -45,6 +106,8 @@ public sealed class EquipmentInventorySnapshotParserTests
     [InlineData("Wyjmujesz koral z zszywanej torby.")]
     [InlineData("Sprzedajesz koral za 30 miedzianych monet.")]
     [InlineData("Kupujesz zdobione lustro za 14 miedzianych monet.")]
+    [InlineData("Agron daje ci ksiege.")]
+    [InlineData("Dajesz ksiege Agronowi.")]
     public void RecognizesObservedInventoryMutationMessages(string line)
     {
         Assert.True(EquipmentInventorySnapshotParser.IsInventoryMutationMessage(line));
@@ -56,16 +119,41 @@ public sealed class EquipmentInventorySnapshotParserTests
         Assert.False(EquipmentInventorySnapshotParser.IsInventoryMutationMessage("Koral mówi: Podnosisz mnie?"));
     }
 
+    [Fact]
+    public void DoesNotTreatObservedCoinPilePickupAsInventoryMutation()
+    {
+        Assert.False(EquipmentInventorySnapshotParser.IsInventoryMutationMessage("Podnosisz kupke monet."));
+        Assert.Null(EquipmentInventorySnapshotParser.GetInventoryMutationKind("Podnosisz kupke monet."));
+        Assert.False(EquipmentInventorySnapshotParser.IsInventoryMutationMessage("Wyjmujesz kupke monet z ciala."));
+        Assert.Null(EquipmentInventorySnapshotParser.GetInventoryMutationKind("Wyjmujesz kupke monet z ciala."));
+    }
+
     [Theory]
     [InlineData("Podnosisz koral.", InventoryMutationKind.Added)]
     [InlineData("Kupujesz zdobione lustro.", InventoryMutationKind.Added)]
     [InlineData("Upuszczasz koral.", InventoryMutationKind.Removed)]
     [InlineData("Sprzedajesz koral.", InventoryMutationKind.Removed)]
+    [InlineData("Dajesz ksiege Agronowi.", InventoryMutationKind.Removed)]
+    [InlineData("Agron daje ci ksiege.", InventoryMutationKind.Added)]
     [InlineData("Wkladasz koral do torby.", InventoryMutationKind.PutIntoContainer)]
     [InlineData("Wyjmujesz koral z torby.", InventoryMutationKind.TakenFromContainer)]
     public void ClassifiesObservedInventoryMutationMessages(string line, InventoryMutationKind expected)
     {
         Assert.Equal(expected, EquipmentInventorySnapshotParser.GetInventoryMutationKind(line));
+    }
+
+    [Fact]
+    public void ManualContainerReferenceUsesGroundInventoryEquipmentOccurrenceOrder()
+    {
+        var snapshot = new EquipmentInventorySnapshot(
+            [new EquipmentItem("plecy", "podrozna torba")],
+            [new InventoryItem("mala torba"), new InventoryItem("zszywana torba")],
+            [new InventoryItem("torba na ziemi")]);
+
+        var resolved = EquipmentInventorySnapshotParser.TryResolveInventoryItemIndex(snapshot, "3.torba", out var index);
+
+        Assert.True(resolved);
+        Assert.Equal(1, index);
     }
 
     [Fact]
@@ -107,6 +195,40 @@ public sealed class EquipmentInventorySnapshotParserTests
     {
         Assert.False(EquipmentInventorySnapshotParser.TryParseContainerContents("Zszywana torba polyskuje magicznym blaskiem.", "zszywana torba", out var contents));
         Assert.Empty(contents);
+    }
+
+    [Fact]
+    public void ParsesGroundContainerContentsWhenServerUsesItsShorterContainerName()
+    {
+        const string response = "Wielki kufer wykonany z mithrilowej blachy.\nMithrilowy kufer (lezy na ziemi) zawiera:\nkupka monet\n";
+
+        Assert.True(EquipmentInventorySnapshotParser.TryParseContainerContents(response, "Wielki kufer wykonany z mithrilowej blachy", out var contents));
+        Assert.Equal("kupka monet", Assert.Single(contents).Name);
+    }
+
+    [Fact]
+    public void ParsesCorpseContentsWhenTheServerAbbreviatesTheCorpseHeader()
+    {
+        const string response = "Zmasakrowane cialo gwardzisty lezy tu i psuje sie powoli.\nCialo gwardzisty (lezy na ziemi) zawiera:\nszkarlatna zbroja\n";
+
+        Assert.True(EquipmentInventorySnapshotParser.TryParseContainerContents(response, "Zmasakrowane cialo gwardzisty", out var contents, acceptServerContainerAlias: true));
+        Assert.Equal("szkarlatna zbroja", Assert.Single(contents).Name);
+    }
+
+    [Theory]
+    [InlineData("Sluzacy nie zyje!!")]
+    [InlineData("Sluzacy pada na ziemie... MARTWY.")]
+    [InlineData("Gwardzista pada na ziemie... MARTWY!!")]
+    public void RecognizesObservedOpponentDeathAnnouncements(string line)
+    {
+        Assert.True(EquipmentInventorySnapshotParser.ContainsObservedOpponentDeath(line));
+    }
+
+    [Fact]
+    public void RecognizesGroundCorpseButNotChest()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsGroundCorpse("Zmasakrowane cialo gwardzisty"));
+        Assert.False(EquipmentInventorySnapshotParser.IsGroundCorpse("Wielki kufer wykonany z mithrilowej blachy"));
     }
 
     [Fact]
@@ -152,6 +274,112 @@ public sealed class EquipmentInventorySnapshotParserTests
     }
 
     [Fact]
+    public void CommandReferenceAvoidsObservedKrysztalowaBransoletkaCollision()
+    {
+        var snapshot = new EquipmentInventorySnapshot(
+            [new EquipmentItem("unoszacy", "krysztal Tellany")],
+            [new InventoryItem("krysztalowa bransoletka")]);
+
+        var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, "krysztal Tellany", false, 0);
+
+        Assert.Equal("Tellany", reference.Word);
+        Assert.Equal("examine Tellany", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference));
+    }
+
+    [Fact]
+    public void ItemCommandReferenceRemovesDisplayPunctuationFromWords()
+    {
+        var snapshot = new EquipmentInventorySnapshot([], [new InventoryItem("Prosta, drewniana szafka")]);
+
+        var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, "Prosta, drewniana szafka", true, 0);
+
+        Assert.Equal("Prosta", reference.Word);
+        Assert.Equal("examine Prosta", EquipmentInventorySnapshotParser.BuildItemCommand("examine", reference));
+    }
+
+    [Fact]
+    public void ExamineResponseMatchesAllNameWordsAfterPolishInflection()
+    {
+        var response = "Waga mithrilowej bransolety celnosci wynosi okolo 0.54 kg.\n<700/700hp 100/100mv>";
+
+        Assert.True(EquipmentInventorySnapshotParser.IsLikelyExamineResponseForItem(
+            response,
+            "mithrilowa bransoleta celnosci"));
+    }
+
+    [Fact]
+    public void ExamineResponseRejectsDifferentItemWhenANameWordIsMissing()
+    {
+        var response = "Krysztalowa bransoletka prawie nic nie wazy.\n<700/700hp 100/100mv>";
+
+        Assert.False(EquipmentInventorySnapshotParser.IsLikelyExamineResponseForItem(
+            response,
+            "krysztal Tellany"));
+    }
+
+    [Fact]
+    public void DirectionQuestionIsRecognizedForCommandWordRetry()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsDirectionQuestion("W jakim kierunku chcesz spojrzec?"));
+    }
+
+    [Fact]
+    public void ClosedLineConfirmsContainerBeforeItsContentsAreVisible()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsClosedContainerResponse(
+            "Masz przed soba drewniana szafke.\n\nZamkniete.\n\n<700/700hp 100/100mv>"));
+    }
+
+    [Fact]
+    public void RecognizesObservedContainerAccessOutcomes()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsContainerOpenedMessage("Otwierasz drewniana szafke."));
+        Assert.True(EquipmentInventorySnapshotParser.IsContainerLockedMessage("Ten obiekt jest zamkniety na klucz."));
+        Assert.True(EquipmentInventorySnapshotParser.IsContainerUnlockedMessage("Odkluczasz mithrilowy kufer."));
+        Assert.True(EquipmentInventorySnapshotParser.IsContainerLockedByKeyMessage("Zamykasz mithrilowy kufer na klucz."));
+        Assert.True(EquipmentInventorySnapshotParser.IsContainerKeyMissingMessage("Brakuje ci niestety klucza."));
+        Assert.False(EquipmentInventorySnapshotParser.IsContainerKeyMissingMessage("Nie mozesz tego zrobic."));
+    }
+
+    [Fact]
+    public void ResolvesContainerFromItsServerConfirmedOperationName()
+    {
+        var snapshot = new EquipmentInventorySnapshot([], [], [new InventoryItem("Wielki kufer wykonany z mithrilowej blachy")]);
+
+        Assert.True(EquipmentInventorySnapshotParser.TryGetContainerOperationOutcome("Odkluczasz mithrilowy kufer.", out var outcome, out var name));
+        Assert.Equal(ContainerOperationOutcome.Unlocked, outcome);
+        Assert.True(EquipmentInventorySnapshotParser.TryResolveGroundContainerIndexFromServerName(snapshot, name, out var index));
+        Assert.Equal(0, index);
+    }
+
+    [Fact]
+    public void RecognizesClosingAContainerBeforeLockingIt()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.TryGetContainerOperationOutcome("Zamykasz mithrilowy kufer.", out var outcome, out _));
+        Assert.Equal(ContainerOperationOutcome.Closed, outcome);
+    }
+
+    [Fact]
+    public void RecognizesSleepingAndWakeUpServerResponses()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsSleepingCharacterResponse("W snach czy co?"));
+        Assert.True(EquipmentInventorySnapshotParser.IsWakeUpMessage("Budzisz sie i wstajesz."));
+        Assert.False(EquipmentInventorySnapshotParser.IsSleepingCharacterResponse("Nie mozesz tego zrobic."));
+    }
+
+    [Fact]
+    public void RetryReferenceUsesSharedOccurrenceOrderForTheNextWord()
+    {
+        var snapshot = new EquipmentInventorySnapshot(
+            [new EquipmentItem("ucho", "kolczyk wszystkich bogow")],
+            [new InventoryItem("fikusny kolczyk")]);
+
+        var reference = EquipmentInventorySnapshotParser.ResolveItemCommandReferenceForWord(snapshot, false, 0, "wszystkich");
+
+        Assert.Equal("wszystkich", reference.Argument);
+    }
+
+    [Fact]
     public void CommandReferenceDoesNotUseVisualStateInParentheses()
     {
         var snapshot = new EquipmentInventorySnapshot(
@@ -175,6 +403,160 @@ public sealed class EquipmentInventorySnapshotParserTests
         Assert.Equal("krysztalowy", reference.Word);
         Assert.Equal(2, reference.Occurrence);
         Assert.Equal("wear 2.krysztalowy", EquipmentInventorySnapshotParser.BuildItemCommand("wear", reference));
+    }
+
+    [Fact]
+    public void GroundItemsAreParsedFromObservedRoomObjectLinesButNotRoomPeople()
+    {
+        const string response = "Hematyt lezy tutaj.\nMieszkaniec miasta przechadza sie tutaj.\nMieszkaniec miasta stoi tutaj.\n(NPK) Agron mezczyzna polork stoi tutaj.\nTablica skarg i wnioskow stoi tutaj.\n<700/700hp 100/100mv> pokoj";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, ["Mieszkaniec miasta", "Agron"]);
+
+        Assert.Equal(["Hematyt", "Tablica skarg i wnioskow"], items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void ParsesObservedGroundItemPresentationForms()
+    {
+        const string response = "Widzisz dlugi i ostry miecz.\nSzkarlatny pas wykonany ze skory wala sie tutaj.\nLeza tu szkarlatne buty.\nSzkarlatne rekawice przyciagaja twoj wzrok.\nPiekna, szkarlatna zbroja wykonana z elfiej stali.\nCzyjs rozgnieciony mozg plywa sobie tutaj.\nSluzacy przebiega obok ciebie bardzo sie spieszac.";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, ["Sluzacy"]);
+
+        Assert.Equal(
+            ["dlugi i ostry miecz", "Szkarlatny pas wykonany ze skory", "szkarlatne buty", "Szkarlatne rekawice", "Piekna, szkarlatna zbroja wykonana z elfiej stali", "Czyjs rozgnieciony mozg"],
+            items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void TreatsEveryPostDescriptionLineAsGroundItemExceptGmcpPeople()
+    {
+        const string response = "\nSkarbiec\n[Wyjscia: Wyjscie]\nOpis pomieszczenia.\n\nNieznany przedmiot o nietypowym opisie.\n(NPK) Norga kobieta czlowiek stoi tutaj.\n\n<700/700hp 100/100mv> Skarbiec";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, ["Norga"]);
+
+        Assert.Equal(["Nieznany przedmiot o nietypowym opisie"], items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void DoesNotTreatRoomHeaderAndDescriptionAsGroundItems()
+    {
+        const string response = "\nSkarbiec\n[Wyjscia: Wyjscie]\nOpis pomieszczenia.\n\nSzafir gwiazdzisty lezy tutaj.\nBransoleta z ametystem polyskuje magicznym blaskiem.\nWielki kufer wykonany z mithrilowej blachy.\n\n<700/700hp 100/100mv> Skarbiec";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, []);
+
+        Assert.Equal(["Szafir gwiazdzisty", "Bransoleta z ametystem polyskuje magicznym blaskiem", "Wielki kufer wykonany z mithrilowej blachy"], items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void StandingCharacterWithNarrativeSuffixIsNotAGroundItem()
+    {
+        const string response = "Zoldak stoi tutaj i bacznie cie obserwuje.";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, []);
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void ParsesObservedBodiesAndChestAsGroundContainerCandidates()
+    {
+        const string response = "Zmasakrowane cialo Vierdona lezy tu i psuje sie powoli.\nWielki kufer wykonany z mithrilowej blachy.";
+
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems(response, []);
+
+        Assert.Equal(["Zmasakrowane cialo Vierdona", "Wielki kufer wykonany z mithrilowej blachy"], items.Select(item => item.Name));
+        Assert.All(items, item => Assert.True(EquipmentInventorySnapshotParser.IsPotentialGroundContainer(item.Name)));
+    }
+
+    [Theory]
+    [InlineData("zamknieta skrzynia z debowego drewna")]
+    [InlineData("stara szafka")]
+    [InlineData("wysoki regal")]
+    [InlineData("kamienny sarkofag")]
+    public void PotentialGroundContainerVocabularyOnlyQualifiesForExamine(string name)
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsPotentialGroundContainer(name));
+    }
+
+    [Fact]
+    public void ConfirmsGroundBodyContainerFromObservedContainsHeader()
+    {
+        const string response = "Cialo Vierdona (lezy na ziemi) zawiera:\nszkarlatna zbroja\n<700/700hp 100/100mv> pokoj";
+
+        var parsed = EquipmentInventorySnapshotParser.TryParseContainerContents(response, "Zmasakrowane cialo Vierdona", out var contents);
+
+        Assert.True(parsed);
+        Assert.Equal("szkarlatna zbroja", Assert.Single(contents).Name);
+    }
+
+    [Fact]
+    public void ParsesObservedLocatedStandAndConfirmsItsEmptyContainerBlock()
+    {
+        var items = EquipmentInventorySnapshotParser.ParseGroundItems("Pod sciana znajduje sie jakis stojak.", []);
+        Assert.Equal("jakis stojak", Assert.Single(items).Name);
+
+        var parsed = EquipmentInventorySnapshotParser.TryParseContainerContents(
+            "Stojak na bron (lezy na ziemi) zawiera:\nOgolnie nic.\n<700/700hp 97/100mv> Magazyn",
+            "jakis stojak", out var contents);
+
+        Assert.True(parsed);
+        Assert.Empty(contents);
+    }
+
+    [Fact]
+    public void GroundItemsTakePriorityInCommandOccurrenceOrder()
+    {
+        var snapshot = new EquipmentInventorySnapshot(
+            [new EquipmentItem("palec", "krysztalowy pierscien")],
+            [new InventoryItem("krysztalowy pierscien")],
+            [new InventoryItem("krysztalowy pierscien")]);
+
+        var ground = EquipmentInventorySnapshotParser.ResolveGroundItemCommandReference(snapshot, "krysztalowy pierscien", 0);
+        var inventory = EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, "krysztalowy pierscien", true, 0);
+        var equipment = EquipmentInventorySnapshotParser.ResolveItemCommandReference(snapshot, "krysztalowy pierscien", false, 0);
+
+        Assert.Equal("krysztalowy", ground.Argument);
+        Assert.Equal("2.krysztalowy", inventory.Argument);
+        Assert.Equal("3.krysztalowy", equipment.Argument);
+    }
+
+    [Fact]
+    public void ManualGroundContainerReferenceResolvesAUserTypedContainerWord()
+    {
+        var snapshot = new EquipmentInventorySnapshot([], [], [new InventoryItem("Wielki kufer wykonany z mithrilowej blachy")]);
+
+        Assert.True(EquipmentInventorySnapshotParser.TryResolveGroundItemIndex(snapshot, "kufer", out var index));
+        Assert.Equal(0, index);
+    }
+
+    [Fact]
+    public void PickupAcknowledgementReturnsTheGroundItemName()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.TryGetPickedUpItemName("Podnosisz jaspis.", out var item));
+        Assert.Equal("jaspis", item);
+        Assert.False(EquipmentInventorySnapshotParser.TryGetPickedUpItemName("Nie mozesz tego podniesc.", out _));
+    }
+
+    [Fact]
+    public void GroundDropIsRecognizedOnlyFromTheObservedSuccessMessage()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsGroundDropMessage("Upuszczasz jaspis."));
+        Assert.False(EquipmentInventorySnapshotParser.IsGroundDropMessage("Nie mozesz tego upuscic."));
+    }
+
+    [Theory]
+    [InlineData("Poltorareczny miecz rozsypuje sie w proch.")]
+    [InlineData("Szkarlatny pas rozpada sie.")]
+    [InlineData("Szkarlatne buty rozpadaja sie.")]
+    public void RecognizesObservedItemDisintegrationNotices(string line)
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsItemDisintegrationMessage(line));
+    }
+
+    [Fact]
+    public void DoesNotTreatAnOrdinaryRoomSentenceAsItemDisintegration()
+    {
+        Assert.False(EquipmentInventorySnapshotParser.IsItemDisintegrationMessage("Szkarlatny pas lezy tutaj."));
     }
 
     [Fact]

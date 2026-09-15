@@ -157,6 +157,36 @@ Wyświetlanie zapamiętanych zaklęć można w razie potrzeby ukryć, dzięki cz
 
 ---
 
+# Ekwipunek
+
+Panel **Ekwipunek** pokazuje cztery widoki:
+
+- **Equipment** — przedmioty aktualnie założone oraz rozpoznane podsumowanie ich bonusów,
+- **Inventory** — przedmioty noszone przy sobie,
+- **Pokój** — rozpoznane przedmioty leżące na ziemi,
+- **Tatuaże** — wykryte tatuaże oraz ich bonusy.
+
+Najedź kursorem na przedmiot, aby zobaczyć ostatni opis uzyskany z `examine`.
+Panel zachowuje dokładnie informacje zwrócone przez grę, dlatego przedmiot bez
+pełnej identyfikacji może mieć krótszy opis. Przedmiot oznaczony jako
+**(kontener)** ma zapamiętaną zawartość, którą można sprawdzić z menu pod
+prawym przyciskiem myszy. Gdy serwer potwierdzi, że kontener jest zamknięty,
+panel pokaże odpowiedni status: **(otwarte)**, **(zamkniete)**, **(zamkniety na klucz)** lub
+**(brak klucza)**. Menu pokaże wtedy właściwą akcję otwarcia albo zamknięcia; po udanym
+otwarciu zawartość kontenera jest ponownie odczytywana.
+
+Jeżeli postać śpi podczas wejścia do gry, panel wstrzymuje automatyczny odczyt
+i wznawia go dopiero po serwerowym komunikacie o obudzeniu postaci.
+
+Menu kontekstowe pozwala wykonywać zależne od przedmiotu akcje, np. zakładać,
+zdejmować, trzymać, podnosić, upuszczać, sprzedawać, dawać innym osobom oraz
+wkładać do kontenerów i z nich wyjmować. Przedmioty o trwałości poniżej 30%
+są oznaczone czerwonym symbolem ostrzeżenia. Rzadkie przedmioty znalezione w
+pokoju lub w rozpoznanym kontenerze są wyróżniane w zakładce **Pokój** i
+zgłaszane w terminalu.
+
+---
+
 # Buffy
 
 System buffów został znacznie rozbudowany.

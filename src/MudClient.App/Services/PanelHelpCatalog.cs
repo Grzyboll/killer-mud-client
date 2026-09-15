@@ -133,15 +133,19 @@ public static class PanelHelpCatalog
             []),
         new(
             "EquipmentInventory",
-            "Equipment & Inventory",
-            "Shows the latest confirmed equipment and carried-inventory snapshots. The server remains the source of truth; the panel only presents responses actually received by the client.",
+            "Ekwipunek",
+            "Panel zbiera w jednym miejscu Twój założony ekwipunek, przedmioty noszone przy sobie, przedmioty w pokoju oraz tatuaże.",
             [
-                "Equipment slots, inventory rows and tattoos are refreshed after confirmed game events and full snapshots.",
-                "Item tooltips retain the latest technical examine response received from the server; unidentified items therefore show only the information the server returned.",
-                "The Tattoos tab reads only tattoo blocks and their bracketed bonuses from examine self. Their numeric bonuses are included in the equipment total.",
-                "Weapon and shield sections show examine statistics when available. Red ⚠ percentage markers and a terminal warning identify items below 30% durability."
+                "Equipment pokazuje przedmioty założone w poszczególnych miejscach oraz ich rozpoznane bonusy.",
+                "Inventory pokazuje rzeczy noszone przy sobie. Pokój zawiera rozpoznane przedmioty leżące na ziemi, a Tatuaże — ich położenie i bonusy.",
+                "Najedź na przedmiot, aby zobaczyć ostatni zapamiętany opis z komendy examine. Jeśli przedmiot nie został dokładnie zidentyfikowany, opis może być krótszy.",
+                "Jeśli postać śpi podczas wejścia do gry, odczyt ekwipunku zaczeka na komunikat o jej obudzeniu. Po obudzeniu odświeżane są pokój i inventory.",
+                "(kontener) oznacza przedmiot, którego zawartość została rozpoznana. Panel pokaże, czy kontener jest otwarty, zamknięty, zamknięty na klucz albo czy brakuje klucza. Czerwone ⚠ przy nazwie ostrzega o trwałości poniżej 30%.",
+                "Gdy gra zgłosi, że przedmiot rozsypał się w proch albo rozpadł się, panel odświeży inventory i listę przedmiotów w pokoju.",
+                "Gdy w tym samym miejscu są co najmniej dwa przedmioty tego samego rozpoznanego typu lub z tym samym rzeczownikiem, menu może pokazać akcję grupową. Klejnoty używają polecenia all.klejnot, a kolczyki, pierścionki i bransolety mają dodatkową akcję dla całej biżuterii (all.gem).",
+                "Rzadki przedmiot znaleziony w pokoju lub w rozpoznanym kontenerze jest wyróżniony i zgłaszany w terminalu."
             ],
-            "Right-click an equipment or inventory item to send a supported command. Inventory items are examined in sequence; an examine response with a confirmed 'contains' section is remembered as a container, enabling Take and Put into that container. Other actions include identify, give to a GMCP-reported room occupant, wear, hold, wield, drop and sell. This first stage has no panel-specific settings.",
+            "Kliknij przedmiot prawym przyciskiem, aby wybrać dostępną akcję. W zależności od miejsca i rodzaju przedmiotu możesz go między innymi zbadać, założyć, zdjąć, podnieść, upuścić, sprzedać, dać innej osobie, włożyć do kontenera, z niego wyjąć albo otworzyć kontener.",
             []),
         new(
             "Chat",

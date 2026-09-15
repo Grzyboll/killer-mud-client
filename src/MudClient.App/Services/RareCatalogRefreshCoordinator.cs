@@ -53,6 +53,33 @@ public sealed class RareCatalogRefreshCoordinator
         }
     }
 
+    /// <summary>Fetches only the pageable <c>rarelist all</c> index. This is suitable for normal
+    /// client-side detection: unlike <see cref="RefreshAsync"/>, it never requests per-vnum details.</summary>
+    public async Task<RareCatalogDocument> RefreshListAsync(
+        Func<string, CancellationToken, Task> sendCommandAsync,
+        IProgress<RareCatalogRefreshProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        progress?.Report(new RareCatalogRefreshProgress("Pobieranie listy rzadkich przedmiotów", 0, 0));
+        var lines = await CapturePagedListResponseAsync(
+            "rarelist all", sendCommandAsync, _listQuietPeriod, _responseTimeout, cancellationToken).ConfigureAwait(false);
+        var rares = RareListParser.ParseList(lines)
+            .GroupBy(entry => entry.Vnum)
+            .Select(group => group.Last())
+            .Select(entry => new RareEntry
+            {
+                Vnum = entry.Vnum,
+                Name = entry.Name,
+                ItemType = entry.ItemType,
+                Slot = entry.Slot,
+                Flag = entry.Flag,
+                Category = entry.Category,
+            })
+            .ToList();
+        progress?.Report(new RareCatalogRefreshProgress("Zakończono pobieranie listy", rares.Count, rares.Count));
+        return new RareCatalogDocument { GeneratedAtUtc = DateTimeOffset.UtcNow, Rares = rares };
+    }
+
     public bool TryCaptureLine(string line)
     {
         lock (_captureLock)
@@ -197,7 +224,7 @@ public sealed class RareCatalogRefreshCoordinator
                 quietPeriod,
                 timeoutCancellation.Token).ConfigureAwait(false);
 
-            while (RareListParser.ContainsPagerPrompt(latestResponse))
+            while (latestResponse.HasPagerPrompt)
             {
                 latestResponse = await SendAndWaitForQuietAsync(
                     capture,
@@ -246,7 +273,7 @@ public sealed class RareCatalogRefreshCoordinator
         }
     }
 
-    private static async Task<IReadOnlyList<string>> SendAndWaitForQuietAsync(
+    private static async Task<CapturedResponse> SendAndWaitForQuietAsync(
         CaptureSession capture,
         List<string> lines,
         Func<CancellationToken, Task> sendAsync,
@@ -263,7 +290,7 @@ public sealed class RareCatalogRefreshCoordinator
 
         if (MudPromptRegex.IsMatch(responseText.ToString()))
         {
-            return lines.Skip(responseStart).ToArray();
+            return CreateCapturedResponse(lines, responseStart, responseText);
         }
 
         while (true)
@@ -272,9 +299,23 @@ public sealed class RareCatalogRefreshCoordinator
             var drained = DrainCapture(capture, lines, responseText);
             if (MudPromptRegex.IsMatch(responseText.ToString()) || !drained.HadLines)
             {
-                return lines.Skip(responseStart).ToArray();
+                return CreateCapturedResponse(lines, responseStart, responseText);
             }
         }
+    }
+
+    private static CapturedResponse CreateCapturedResponse(
+        IReadOnlyList<string> lines,
+        int responseStart,
+        StringBuilder responseText)
+    {
+        var responseLines = lines.Skip(responseStart).ToArray();
+        // The marker may be split between TCP reads: it can be visible to TextReceived before
+        // LineReceived has produced the complete line. Raw text is therefore a valid signal
+        // to send the next Enter, while the parsed list still uses complete lines only.
+        var hasPagerPrompt = RareListParser.ContainsPagerPrompt(responseLines)
+            || responseText.ToString().Contains("Nacisnij Enter", StringComparison.OrdinalIgnoreCase);
+        return new CapturedResponse(hasPagerPrompt);
     }
 
     private CaptureSession BeginCapture()
@@ -335,6 +376,8 @@ public sealed class RareCatalogRefreshCoordinator
     }
 
     private readonly record struct DrainResult(bool HadActivity, bool HadLines);
+
+    private readonly record struct CapturedResponse(bool HasPagerPrompt);
 
     private sealed class CaptureSession
     {

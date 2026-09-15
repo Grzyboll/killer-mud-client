@@ -56,8 +56,8 @@ public sealed class PanelHelpTests
         Assert.Contains(automation.Indicators, indicator => indicator.Contains("naprawdę go uruchamia", StringComparison.Ordinal));
         Assert.Contains(farm.Indicators, indicator => indicator.Contains("~zaklęcie", StringComparison.Ordinal));
         Assert.Contains("diagnostyczny", gmcp.Overview, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("server remains the source of truth", equipment.Overview, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(equipment.Indicators, indicator => indicator.Contains("Tattoo", StringComparison.Ordinal));
+        Assert.Contains("założony ekwipunek", equipment.Overview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(equipment.Indicators, indicator => indicator.Contains("Tatuaże", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]

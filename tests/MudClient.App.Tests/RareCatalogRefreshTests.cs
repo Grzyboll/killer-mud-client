@@ -221,6 +221,43 @@ public sealed class RareCatalogRefreshTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshList_PagesWhenPagerMarkerArrivesOnlyThroughRawText()
+    {
+        var coordinator = new RareCatalogRefreshCoordinator(
+            TimeSpan.FromMilliseconds(5),
+            TimeSpan.FromMilliseconds(5),
+            TimeSpan.FromSeconds(2));
+        var sent = new List<string>();
+
+        Task Send(string command, CancellationToken cancellationToken)
+        {
+            sent.Add(command);
+            if (command == "rarelist all")
+            {
+                coordinator.TryCaptureLine("<<============= lista przedmiotow unikalnych - artefact =============>>");
+                coordinator.TryCaptureLine(
+                    "+[-1 d] [N] ( kilof             - one hand      ) [29099] krasnoludzki kilof 'Potega Ziemi'");
+                // The line accumulator may not have delivered this marker yet even though the
+                // raw text receiver has. The refresh must still continue the pager.
+                coordinator.ObserveText("[Nacisnij Enter aby kontynuowac]\r\n> ");
+            }
+            else
+            {
+                coordinator.TryCaptureLine(
+                    "+[-1 d] [N] ( swiatlo           - nad glowa     ) [  211] krysztal Tellany");
+                coordinator.ObserveText("<418/488hp 90/100mv> ");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        var catalog = await coordinator.RefreshListAsync(Send, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["rarelist all", string.Empty], sent);
+        Assert.Contains(catalog.Rares, rare => rare.Vnum == 211 && rare.Name == "krysztal Tellany");
+    }
+
+    [Fact]
     public async Task Refresh_MudPromptCompletesResponseWithoutWaitingForQuietPeriod()
     {
         var coordinator = new RareCatalogRefreshCoordinator(

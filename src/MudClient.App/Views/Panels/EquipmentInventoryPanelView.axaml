@@ -1,5 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:controls="using:MudClient.App.Controls" xmlns:equipment="using:MudClient.Core.Equipment" xmlns:gmcp="using:MudClient.Core.Gmcp" xmlns:vm="using:MudClient.App.ViewModels" x:Class="MudClient.App.Views.Panels.EquipmentInventoryPanelView" x:Name="EquipmentInventoryPanel" x:DataType="vm:MainWindowViewModel">
-  <TabControl Classes="mud-subtabs">
+  <StackPanel Spacing="4">
+    <CheckBox Content="Monitorowanie ekwipunku" IsChecked="{Binding EquipmentMonitoringEnabled}" Margin="6,4,6,0" />
+  <TabControl Classes="mud-subtabs" IsEnabled="{Binding EquipmentMonitoringEnabled}">
     <TabItem Header="Equipment"><ScrollViewer><StackPanel Margin="6" Spacing="2">
       <TextBlock Text="{Binding EquipmentInventory.StatusText}" Classes="mud-faint" FontSize="11"/>
       <ItemsControl ItemsSource="{Binding EquipmentInventory.Equipment}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:EquipmentInventoryRow">
@@ -44,6 +46,8 @@
         <Border Classes="mud-section" Padding="4" Margin="0,1"><ToolTip.Tip><TextBlock Text="{Binding ExamineDescription}" TextWrapping="NoWrap"/></ToolTip.Tip><Border.ContextMenu><ContextMenu>
           <MenuItem Header="Zbadaj" Command="{Binding #EquipmentInventoryPanel.DataContext.ExecuteGroundExamineCommand}" CommandParameter="{Binding}"/>
           <MenuItem Header="Podnieś" Command="{Binding #EquipmentInventoryPanel.DataContext.ExecuteGroundTakeCommand}" CommandParameter="{Binding}"/>
+          <MenuItem Header="Napij się" IsVisible="{Binding IsWaterSource}" Command="{Binding #EquipmentInventoryPanel.DataContext.ExecuteGroundDrinkCommand}" CommandParameter="{Binding}"/>
+          <MenuItem Header="Napełnij bukłak" IsVisible="{Binding IsWaterSource}" Tag="{Binding}" ItemsSource="{Binding #EquipmentInventoryPanel.DataContext.InventoryFlasks}" Click="FillInventoryFlask_OnClick"><MenuItem.ItemTemplate><DataTemplate x:DataType="vm:EquipmentInventoryRow"><MenuItem Header="{Binding MenuDisplayName}" FontSize="10" Padding="6,1" MinHeight="0" Margin="0"/></DataTemplate></MenuItem.ItemTemplate></MenuItem>
           <MenuItem Header="Podnieś grupowo" IsVisible="{Binding HasBulkActions}" ItemsSource="{Binding BulkActionsOrEmpty}"><MenuItem.ItemTemplate><DataTemplate x:DataType="equipment:ItemBulkGroup"><MenuItem Header="{Binding DisplayName}" Command="{Binding #EquipmentInventoryPanel.DataContext.ExecuteGroundBulkTakeCommand}" CommandParameter="{Binding}"/></DataTemplate></MenuItem.ItemTemplate></MenuItem>
           <MenuItem Header="Wyjmij" IsVisible="{Binding IsIdentifiedContainer}" Tag="{Binding}" ItemsSource="{Binding ContainerContentsOrEmpty}" Click="TakeGroundContainerItem_OnClick"><MenuItem.ItemTemplate><DataTemplate x:DataType="vm:ContainerInventoryItem"><MenuItem Header="{Binding MenuDisplayName}" FontSize="10" Padding="6,1" MinHeight="0" Margin="0"/></DataTemplate></MenuItem.ItemTemplate></MenuItem>
           <MenuItem Header="Wyjmij grupowo" IsVisible="{Binding HasContainerBulkActions}" Tag="{Binding}" ItemsSource="{Binding ContainerBulkActionsOrEmpty}" Click="TakeGroundContainerItemGroup_OnClick"><MenuItem.ItemTemplate><DataTemplate x:DataType="equipment:ItemBulkGroup"><MenuItem Header="{Binding DisplayName}" FontSize="10" Padding="6,1" MinHeight="0" Margin="0"/></DataTemplate></MenuItem.ItemTemplate></MenuItem>
@@ -63,4 +67,5 @@
       </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
     </StackPanel></ScrollViewer></TabItem>
   </TabControl>
+  </StackPanel>
 </UserControl>

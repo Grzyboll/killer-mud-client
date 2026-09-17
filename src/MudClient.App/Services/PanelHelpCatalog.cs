@@ -137,11 +137,14 @@ public static class PanelHelpCatalog
             "Panel zbiera w jednym miejscu Twój założony ekwipunek, przedmioty noszone przy sobie, przedmioty w pokoju oraz tatuaże.",
             [
                 "Equipment pokazuje przedmioty założone w poszczególnych miejscach oraz ich rozpoznane bonusy.",
+                "Przełącznik Monitorowanie ekwipunku jest wspólny z panelem Ustawienia i zapisywany osobno dla postaci. Wyłączenie zatrzymuje odczyty oraz akcje panelu; włączenie w czasie gry uruchamia pełny odczyt od nowa.",
                 "Inventory pokazuje rzeczy noszone przy sobie. Pokój zawiera rozpoznane przedmioty leżące na ziemi, a Tatuaże — ich położenie i bonusy.",
                 "Najedź na przedmiot, aby zobaczyć ostatni zapamiętany opis z komendy examine. Jeśli przedmiot nie został dokładnie zidentyfikowany, opis może być krótszy.",
                 "Jeśli postać śpi podczas wejścia do gry, odczyt ekwipunku zaczeka na komunikat o jej obudzeniu. Po obudzeniu odświeżane są pokój i inventory.",
                 "(kontener) oznacza przedmiot, którego zawartość została rozpoznana. Panel pokaże, czy kontener jest otwarty, zamknięty, zamknięty na klucz albo czy brakuje klucza. Czerwone ⚠ przy nazwie ostrzega o trwałości poniżej 30%.",
                 "Gdy gra zgłosi, że przedmiot rozsypał się w proch albo rozpadł się, panel odświeży inventory i listę przedmiotów w pokoju.",
+                "Po wejściu do pokoju lista przedmiotów jest zapamiętywana od razu, a sprawdzanie możliwych kontenerów zaczyna się dopiero po krótkim zatrzymaniu ruchu.",
+                "Przy fontannie lub studni menu pokoju pozwala napić się, a gdy nosisz bukłak — również go napełnić.",
                 "Gdy w tym samym miejscu są co najmniej dwa przedmioty tego samego rozpoznanego typu lub z tym samym rzeczownikiem, menu może pokazać akcję grupową. Klejnoty używają polecenia all.klejnot, a kolczyki, pierścionki i bransolety mają dodatkową akcję dla całej biżuterii (all.gem).",
                 "Rzadki przedmiot znaleziony w pokoju lub w rozpoznanym kontenerze jest wyróżniony i zgłaszany w terminalu."
             ],

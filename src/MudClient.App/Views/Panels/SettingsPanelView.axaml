@@ -10,6 +10,15 @@
       <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                  Text="Wspólne dla wszystkich kont. Zapisywane automatycznie." />
 
+      <TextBlock Classes="mud-heading" Text="Ekwipunek" Margin="0,6,0,0" />
+      <Border Classes="mud-section" Padding="10">
+        <StackPanel Spacing="4">
+          <CheckBox Content="Monitorowanie ekwipunku" IsChecked="{Binding EquipmentMonitoringEnabled}" />
+          <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                     Text="Ustawienie jest zapisywane osobno dla postaci. Po włączeniu podczas gry panel odczyta ponownie ekwipunek, inventory, tatuaże i przedmioty w pokoju." />
+        </StackPanel>
+      </Border>
+
       <TextBlock Classes="mud-heading" Text="Tekst z MUD-a" Margin="0,6,0,0" />
       <Border Classes="mud-section" Padding="10">
         <StackPanel Spacing="10">

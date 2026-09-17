@@ -40,6 +40,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private const bool ShowEquipmentExamineCommandEcho = true;
     private const bool ShowEquipmentScanResponses = true;
     private static readonly TimeSpan EquipmentScanCommandGap = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan RoomContainerScanQuietPeriod = TimeSpan.FromMilliseconds(800);
     private const double SmartBuffPanelMinimumExpirationProbability = 0.70;
     private static readonly Uri DiscordInviteUri = new("https://discord.gg/6NRnxZeMTC");
     private static readonly Uri DiscussionsUri = new("https://github.com/Grzyboll/killer-mud-client/discussions");
@@ -114,6 +115,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private int _roomLookAfterCombatPromptPending;
     private bool _postCombatPromptObserved;
     private CancellationTokenSource? _postCombatRoomLookDelayCts;
+    private CancellationTokenSource? _roomContainerScanDelayCts;
     private int _inventoryMutationBatchCount;
     private bool _inventoryBatchRefreshAnnounced;
     private bool _inventoryBatchRefreshAwaitingCompletion;
@@ -2782,6 +2784,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// profile's values until something else happened to touch them.</summary>
     private void NotifyProfileSettingsChanged()
     {
+        OnPropertyChanged(nameof(EquipmentMonitoringEnabled));
         OnPropertyChanged(nameof(OutputWordWrap));
         OnPropertyChanged(nameof(ShowTerminalVitalsBars));
         OnPropertyChanged(nameof(ShowNumericDamageEnabled));
@@ -3958,7 +3961,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _roomEntryGeneration++;
         // A GMCP location refresh may accompany a client-issued silent "look". Do not replace
         // that capture with the ordinary visible room-entry capture before its response arrives.
-        if (Volatile.Read(ref _hiddenRoomLookResponsePending) == 0)
+        if (EquipmentMonitoringEnabled && Volatile.Read(ref _hiddenRoomLookResponsePending) == 0)
         {
             BeginRoomGroundItemsCapture();
         }
@@ -9131,6 +9134,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteEquipmentRemoveCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "remove"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundExamineCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "examine"));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundTakeCommand => new(row => ExecuteEquipmentItemCommandAsync(row, "take"));
+    public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundDrinkCommand => new(ExecuteGroundDrinkAsync);
     public AsyncRelayCommand<ItemBulkGroup> ExecuteGroundBulkTakeCommand => new(ExecuteGroundBulkTakeAsync);
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundUnlockCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Unlock));
     public AsyncRelayCommand<EquipmentInventoryRow> ExecuteGroundOpenCommand => new(row => ExecuteGroundContainerAccessAsync(row, GroundContainerAccessAction.Open));
@@ -9150,6 +9154,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public IReadOnlyList<EquipmentInventoryRow> InventoryContainers => EquipmentInventory.Inventory
         .Where(item => item.IsIdentifiedContainer)
+        .ToArray();
+    public IReadOnlyList<EquipmentInventoryRow> InventoryFlasks => EquipmentInventory.Inventory
+        .Where(item => EquipmentInventorySnapshotParser.IsInventoryFlask(item.Name))
         .ToArray();
 
     // ========================================================================
@@ -9418,7 +9425,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
                 EmitCommandEcho(command);
                 RememberContainerCommand(command);
-                if (string.Equals(command.Trim(), "look", StringComparison.OrdinalIgnoreCase))
+                if (EquipmentMonitoringEnabled
+                    && string.Equals(command.Trim(), "look", StringComparison.OrdinalIgnoreCase))
                 {
                     BeginRoomGroundItemsCapture();
                 }
@@ -10276,13 +10284,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RefreshEquipmentInventorySilentlyAsync()
     {
+        if (!EquipmentMonitoringEnabled) return;
         if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || Interlocked.CompareExchange(ref _hiddenEquipmentResponsePending, 1, 0) != 0) return;
         _hiddenEquipmentResponse.Clear();
         try
         {
             await Task.Delay(EquipmentScanCommandGap);
-            if (!IsConnected)
+            if (!EquipmentMonitoringEnabled || !IsConnected)
             {
                 Interlocked.Exchange(ref _hiddenEquipmentResponsePending, 0);
                 return;
@@ -10303,13 +10312,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RequestInventorySilentlyAsync()
     {
+        if (!EquipmentMonitoringEnabled) return;
         if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || Interlocked.CompareExchange(ref _hiddenInventoryResponsePending, 1, 0) != 0) return;
         _hiddenInventoryResponse.Clear();
         try
         {
             await Task.Delay(EquipmentScanCommandGap);
-            if (!IsConnected)
+            if (!EquipmentMonitoringEnabled || !IsConnected)
             {
                 Interlocked.Exchange(ref _hiddenInventoryResponsePending, 0);
                 return;
@@ -10355,6 +10365,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RequestRoomLookSilentlyAsync(bool afterInitialEquipmentLoad = false)
     {
+        if (!EquipmentMonitoringEnabled) return;
         if (_initialEquipmentLoadPending
             || (_initialEquipmentLoadAnnounced
                 && (!afterInitialEquipmentLoad || _initialEquipmentScanStage != InitialEquipmentScanStage.Room)))
@@ -10368,7 +10379,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await Task.Delay(EquipmentScanCommandGap);
-            if (!IsConnected || (afterInitialEquipmentLoad
+            if (!EquipmentMonitoringEnabled || !IsConnected || (afterInitialEquipmentLoad
                 && (_initialEquipmentLoadPausedForSleep || _initialEquipmentScanStage != InitialEquipmentScanStage.Room)))
             {
                 Interlocked.Exchange(ref _hiddenRoomLookResponsePending, 0);
@@ -10449,6 +10460,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Interlocked.Exchange(ref _roomLookAfterCombatPromptPending, 0);
         _postCombatPromptObserved = false;
         Interlocked.Exchange(ref _postCombatRoomLookDelayCts, null)?.Cancel();
+        Interlocked.Exchange(ref _roomContainerScanDelayCts, null)?.Cancel();
         lock (_silentEquipmentResponseLock)
         {
             _silentEquipmentResponseLines.Clear();
@@ -10459,6 +10471,28 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(InventoryGiveTargets));
             OnPropertyChanged(nameof(HasInventoryGiveTargets));
         });
+    }
+
+    private void StartEquipmentMonitoringForCurrentSession()
+    {
+        if (!EquipmentMonitoringEnabled || !IsConnected || _equipmentInventoryCheckedForSession) return;
+
+        _equipmentInventoryCheckedForSession = true;
+        _initialEquipmentLoadAnnounced = true;
+        _initialEquipmentLoadPending = false;
+        _initialEquipmentLoadPausedForSleep = false;
+        _initialEquipmentScanStage = InitialEquipmentScanStage.Room;
+        _selfExamineCompleted = false;
+        _activeSelfExamine = false;
+        _activeSelfExamineResponse.Clear();
+        _pendingEquipmentExamines.Clear();
+        _activeEquipmentExamineKey = null;
+        _activeEquipmentExamineItemName = null;
+        _activeEquipmentExamineResponse.Clear();
+        _activeEquipmentExaminePage.Clear();
+        _equipmentExamineSendPending = false;
+        Dispatcher.UIThread.Post(() => EmitSystem("[Ekwipunek] TRWA ŁADOWANIE EKWIPUNKU GRACZA. Proszę nic nie robić i czekać na komunikat o zakończeniu! Dziękuję.", 33));
+        _ = RequestRoomLookSilentlyAsync(afterInitialEquipmentLoad: true);
     }
 
     private void RefreshInventoryAfterMutation(InventoryMutationKind mutation)
@@ -10588,6 +10622,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private bool HandleEquipmentInventoryResponse(string text)
     {
+        if (!EquipmentMonitoringEnabled) return false;
         if (_activeSelfExamine)
         {
             _activeSelfExamineResponse.Append(text);
@@ -10811,6 +10846,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void QueueEquipmentExamines(bool includeEquipment = true, bool includeInventory = true)
     {
+        if (!EquipmentMonitoringEnabled) return;
         _pendingEquipmentExamines.Clear();
         if (includeEquipment)
         {
@@ -10846,7 +10882,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private IEnumerable<int> GetInventoryIndicesToExamine()
     {
-        return _inventoryExaminePlan switch
+        return (_inventoryExaminePlan switch
         {
             InventoryExaminePlan.All => Enumerable.Range(0, _equipmentInventorySnapshot.Inventory.Count),
             InventoryExaminePlan.None => [],
@@ -10861,7 +10897,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     .Select(entry => entry.index))
                 .Distinct(),
             _ => []
-        };
+        }).Where(index => !string.Equals(RandomItemNameCatalog.GetPolishSlotLabel(_equipmentInventorySnapshot.Inventory[index].Name), "gem", StringComparison.OrdinalIgnoreCase));
     }
 
     private IEnumerable<int> GetNewInventoryIndices()
@@ -10887,6 +10923,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         EquipmentInventory.Apply(_equipmentInventorySnapshot, _equipmentExamineDescriptions, _inventoryContainerContents, _containerAccessStates, _tattoos, _rareCategoriesByName);
         OnPropertyChanged(nameof(InventoryContainers));
+        OnPropertyChanged(nameof(InventoryFlasks));
     }
 
     private void SetGroundContainerAccessState(string key, ContainerAccessState state, string source)
@@ -10969,6 +11006,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendNextEquipmentExamineAsync()
     {
+        if (!EquipmentMonitoringEnabled) return;
         if (DeferEquipmentInventoryRefreshWhileFighting()) return;
         if (!IsConnected || _activeEquipmentExamineKey is not null || _activeSelfExamine || _equipmentExamineSendPending) return;
         if (!_pendingEquipmentExamines.TryDequeue(out var request))
@@ -11189,6 +11227,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private bool CaptureRoomGroundItems(string text)
     {
+        if (!EquipmentMonitoringEnabled) return false;
         string? response = null;
         var suppressTerminal = false;
         lock (_roomGroundItemsLock)
@@ -11245,12 +11284,69 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _ = RequestInventorySilentlyAsync();
             return suppressTerminal;
         }
-        QueueGroundContainerExamines();
+        ScheduleGroundContainerExaminesAfterMovement();
         return suppressTerminal;
+    }
+
+    /// <summary>Per-character switch for all automatic Equipment/Inventory monitoring.</summary>
+    public bool EquipmentMonitoringEnabled
+    {
+        get => _profileSettings.EquipmentMonitoringEnabled;
+        set
+        {
+            if (_profileSettings.EquipmentMonitoringEnabled == value) return;
+
+            _profileSettings.EquipmentMonitoringEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+            if (!value)
+            {
+                ResetEquipmentInventoryForCharacter();
+                return;
+            }
+
+            StartEquipmentMonitoringForCurrentSession();
+        }
+    }
+
+    // Room text itself is still retained immediately. Only speculative container examines wait
+    // for a short pause, so moving through several rooms never queues a command per room.
+    private void ScheduleGroundContainerExaminesAfterMovement()
+    {
+        if (!EquipmentMonitoringEnabled) return;
+        _roomContainerScanDelayCts?.Cancel();
+        var cancellation = new CancellationTokenSource();
+        _roomContainerScanDelayCts = cancellation;
+        var roomGeneration = _roomEntryGeneration;
+        _ = QueueGroundContainerExaminesAfterQuietPeriodAsync(cancellation, roomGeneration);
+    }
+
+    private async Task QueueGroundContainerExaminesAfterQuietPeriodAsync(CancellationTokenSource cancellation, long roomGeneration)
+    {
+        try
+        {
+            await Task.Delay(RoomContainerScanQuietPeriod, cancellation.Token);
+            if (!IsConnected || cancellation.IsCancellationRequested || roomGeneration != _roomEntryGeneration)
+            {
+                return;
+            }
+
+            QueueGroundContainerExamines();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        finally
+        {
+            if (ReferenceEquals(_roomContainerScanDelayCts, cancellation))
+            {
+                _roomContainerScanDelayCts = null;
+            }
+            cancellation.Dispose();
+        }
     }
 
     private void QueueGroundContainerExamines()
     {
+        if (!EquipmentMonitoringEnabled) return;
         if (AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition)) return;
 
         foreach (var (item, index) in _equipmentInventorySnapshot.GroundItems.Select((item, index) => (item, index))
@@ -11907,7 +12003,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private Task ExecuteEquipmentItemCommandAsync(EquipmentInventoryRow? row, string? action)
     {
-        if (row is null || string.IsNullOrWhiteSpace(action))
+        if (!EquipmentMonitoringEnabled || row is null || string.IsNullOrWhiteSpace(action))
         {
             return Task.CompletedTask;
         }
@@ -12076,7 +12172,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void GiveInventoryItem(EquipmentInventoryRow? item, RoomPerson? recipient)
     {
-        if (item is null || recipient is null || string.IsNullOrWhiteSpace(recipient.Name))
+        if (!EquipmentMonitoringEnabled || item is null || recipient is null || string.IsNullOrWhiteSpace(recipient.Name))
         {
             return;
         }
@@ -12084,9 +12180,31 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _ = SendCommandAsync($"give {item.CommandReference.Argument} {recipient.Name}");
     }
 
+    public void FillInventoryFlask(EquipmentInventoryRow? source, EquipmentInventoryRow? flask)
+    {
+        if (!EquipmentMonitoringEnabled || source is null || flask is null
+            || !source.IsWaterSource
+            || !EquipmentInventorySnapshotParser.IsInventoryFlask(flask.Name))
+        {
+            return;
+        }
+
+        _ = SendCommandAsync($"fill {flask.CommandReference.Argument} {source.WaterSourceCommandArgument}");
+    }
+
+    private Task ExecuteGroundDrinkAsync(EquipmentInventoryRow? source)
+    {
+        if (!EquipmentMonitoringEnabled || source is null || !source.IsWaterSource || string.IsNullOrWhiteSpace(source.WaterSourceCommandArgument))
+        {
+            return Task.CompletedTask;
+        }
+
+        return SendCommandAsync($"drink {source.WaterSourceCommandArgument}");
+    }
+
     public void PutInventoryItemIntoContainer(EquipmentInventoryRow? item, EquipmentInventoryRow? container)
     {
-        if (item is null || container is null || ReferenceEquals(item, container))
+        if (!EquipmentMonitoringEnabled || item is null || container is null || ReferenceEquals(item, container))
         {
             return;
         }
@@ -12097,7 +12215,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void PutInventoryGroupIntoContainer(ItemBulkGroup? group, EquipmentInventoryRow? container)
     {
-        if (group is null || container is null || group.Count < 2) return;
+        if (!EquipmentMonitoringEnabled || group is null || container is null || group.Count < 2) return;
 
         PlanInventoryExamines(container.Name);
         _ = SendBulkInventoryCommandAsync($"put {group.CommandArgument} {container.CommandReference.Argument}");
@@ -12105,7 +12223,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void TakeContainerItem(EquipmentInventoryRow? container, ContainerInventoryItem? item)
     {
-        if (container is null || item is null)
+        if (!EquipmentMonitoringEnabled || container is null || item is null)
         {
             return;
         }
@@ -12116,7 +12234,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void TakeContainerItemGroup(EquipmentInventoryRow? container, ItemBulkGroup? group)
     {
-        if (container is null || group is null || group.Count < 2) return;
+        if (!EquipmentMonitoringEnabled || container is null || group is null || group.Count < 2) return;
 
         PlanInventoryExamines([container.Name, .. group.ItemNames]);
         _ = SendBulkInventoryCommandAsync($"take {group.CommandArgument} {container.CommandReference.Argument}");
@@ -12124,7 +12242,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void TakeGroundContainerItem(EquipmentInventoryRow? container, ContainerInventoryItem? item)
     {
-        if (container is null || item is null)
+        if (!EquipmentMonitoringEnabled || container is null || item is null)
         {
             return;
         }
@@ -12138,7 +12256,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void TakeGroundContainerItemGroup(EquipmentInventoryRow? container, ItemBulkGroup? group)
     {
-        if (container is null || group is null || group.Count < 2) return;
+        if (!EquipmentMonitoringEnabled || container is null || group is null || group.Count < 2) return;
 
         PlanInventoryExamines(group.ItemNames.ToArray());
         Interlocked.Exchange(ref _roomLookAfterInventoryRefreshPending, 1);
@@ -12992,14 +13110,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void OnCharacterVitalsChanged(CharacterVitalsUpdate update)
     {
-        ScheduleWeeklyRareListRefresh();
-        if (update.Name is { } newCharacterName
+        if (EquipmentMonitoringEnabled)
+        {
+            ScheduleWeeklyRareListRefresh();
+        }
+        if (EquipmentMonitoringEnabled && update.Name is { } newCharacterName
             && _latestCharacterName is { } previousCharacterName
             && !string.Equals(previousCharacterName, newCharacterName, StringComparison.OrdinalIgnoreCase))
         {
             ResetEquipmentInventoryForCharacter();
         }
-        if (!_equipmentInventoryCheckedForSession)
+        if (EquipmentMonitoringEnabled && !_equipmentInventoryCheckedForSession)
         {
             _equipmentInventoryCheckedForSession = true;
             _initialEquipmentLoadAnnounced = true;
@@ -14835,12 +14956,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _triggerSendLock.Release();
 
         await _timers.DisposeAsync();
+        _roomContainerScanDelayCts?.Cancel();
         await _session.DisposeAsync();
         await Map.DisposeAsync();
         _triggerSendLock.Dispose();
         _triggerCts.Dispose();
         _autowalkCts.Dispose();
         _automationActivityClearCts?.Dispose();
+        _roomContainerScanDelayCts?.Dispose();
         foreach (var cts in _triggerRecentlyFiredClearTokens.Values)
         {
             cts.Dispose();

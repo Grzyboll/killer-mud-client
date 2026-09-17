@@ -11,6 +11,10 @@ namespace MudClient.App.Models;
 /// </summary>
 public sealed class ProfileAutomationSettings
 {
+    /// <summary>Collects and refreshes the Equipment, Inventory, room-loot and tattoo panels for
+    /// this character. Kept enabled by default to preserve the existing panel behaviour.</summary>
+    public bool EquipmentMonitoringEnabled { get; set; } = true;
+
     /// <summary>Wraps long MUD output lines to the terminal width.</summary>
     public bool OutputWordWrap { get; set; } = true;
 

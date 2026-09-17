@@ -148,6 +148,8 @@ public sealed record EquipmentInventoryRow(string Location, string Name, string?
     public IReadOnlyList<ItemBulkGroup> ContainerBulkActionsOrEmpty => ContainerBulkActions ?? [];
     public bool HasBulkActions => BulkActionsOrEmpty.Count > 0;
     public bool HasContainerBulkActions => ContainerBulkActionsOrEmpty.Count > 0;
+    public bool IsWaterSource => EquipmentInventorySnapshotParser.IsGroundWaterSource(Name);
+    public string WaterSourceCommandArgument => EquipmentInventorySnapshotParser.GetGroundWaterSourceCommandTarget(Name);
     public string MenuDisplayName => AnsiText.StripKillerColors(AnsiText.StripAnsi(Name)).Trim();
 }
 public sealed record ContainerInventoryItem(string Name, ItemCommandReference CommandReference, string RandomSlotLabel = "")

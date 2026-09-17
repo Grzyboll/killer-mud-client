@@ -34,6 +34,18 @@ public sealed partial class EquipmentInventoryPanelView : UserControl
         viewModel.PutInventoryItemIntoContainer(item, container);
     }
 
+    private void FillInventoryFlask_OnClick(object? sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not MenuItem { Tag: EquipmentInventoryRow source }
+            || eventArgs.Source is not MenuItem { DataContext: EquipmentInventoryRow flask }
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.FillInventoryFlask(source, flask);
+    }
+
     private void PutInventoryItemGroup_OnClick(object? sender, RoutedEventArgs eventArgs)
     {
         if (sender is not MenuItem { Tag: ItemBulkGroup group }

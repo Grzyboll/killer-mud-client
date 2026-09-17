@@ -5,6 +5,12 @@ namespace MudClient.App.Tests.Models;
 public sealed class ProfileAutomationSettingsTests
 {
     [Fact]
+    public void Constructor_EquipmentMonitoringIsEnabledByDefault()
+    {
+        Assert.True(new ProfileAutomationSettings().EquipmentMonitoringEnabled);
+    }
+
+    [Fact]
     public void Constructor_OutputWordWrapIsEnabledByDefault()
     {
         Assert.True(new ProfileAutomationSettings().OutputWordWrap);

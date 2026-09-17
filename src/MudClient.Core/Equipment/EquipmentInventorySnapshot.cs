@@ -34,7 +34,7 @@ public static partial class EquipmentInventorySnapshotParser
         "koszyk", "skrzynka", "pudlo", "pudełko", "pudelko", "skrytka", "schowek", "szafa",
         "gablotka", "gablota", "skrzynia", "trumna", "sarkofag", "urna", "amfora",
         "kuferek", "pojemnik", "naczynie", "skrzynia", "lada", "skład", "sklad",
-        "spiżarnia", "spizarnia", "skarbiec", "szkatułka", "szkatulka", "kaseta", "stojak", "skrzyn"
+        "spiżarnia", "spizarnia", "skarbiec", "szkatułka", "szkatulka", "kaseta", "stojak", "biurko", "skrzyn"
     };
     [GeneratedRegex("^\\s*<(?<slot>[^>]+)>\\s*(?<name>.+?)\\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex EquipmentLine();
@@ -198,6 +198,19 @@ public static partial class EquipmentInventorySnapshotParser
     /// considered a container until its own <c>examine</c> result confirms a <c>zawiera:</c> block.</summary>
     public static bool IsPotentialGroundContainer(string itemName) =>
         Words(itemName).Any(PotentialGroundContainerWords.Contains);
+
+    /// <summary>Recognizes water sources by the observed nouns anywhere in a ground-item name.</summary>
+    public static bool IsGroundWaterSource(string itemName) =>
+        GetGroundWaterSourceCommandTarget(itemName).Length > 0;
+
+    /// <summary>Returns the server noun used by observed drink/fill commands.</summary>
+    public static string GetGroundWaterSourceCommandTarget(string itemName) =>
+        Words(itemName).FirstOrDefault(word => word.Equals("fontanna", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("studnia", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+
+    /// <summary>Recognizes carried flasks which can be offered as a fill target.</summary>
+    public static bool IsInventoryFlask(string itemName) =>
+        Words(itemName).Any(word => word.Equals("buklak", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Recognizes the corpse nouns observed in ground-object lines. Corpses can expose
     /// contents, but are not closable or lockable containers.</summary>
@@ -599,6 +612,11 @@ public static partial class EquipmentInventorySnapshotParser
         // but no item is added to the top-level inventory list.
         if (plain.StartsWith("Podnosisz kupke monet.", StringComparison.OrdinalIgnoreCase)
             || plain.StartsWith("Wyjmujesz kupke monet z ", StringComparison.OrdinalIgnoreCase)) return null;
+        // Money-only handovers change only the counters, never the item list. Keep successful
+        // buy/sell acknowledgements below: those also mention a price in coins but move an item.
+        if (plain.Contains(" monet", StringComparison.OrdinalIgnoreCase)
+            && (plain.StartsWith("Dajesz ", StringComparison.OrdinalIgnoreCase)
+                || plain.Contains(" daje ci ", StringComparison.OrdinalIgnoreCase))) return null;
         if (plain.StartsWith("Podnosisz ", StringComparison.OrdinalIgnoreCase)
             || plain.StartsWith("Kupujesz ", StringComparison.OrdinalIgnoreCase)
             || plain.Contains(" daje ci ", StringComparison.OrdinalIgnoreCase)) return InventoryMutationKind.Added;

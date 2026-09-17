@@ -129,6 +129,32 @@ public sealed class EquipmentInventorySnapshotParserTests
     }
 
     [Theory]
+    [InlineData("Norga daje ci 1000 mithrilowych monet.")]
+    [InlineData("Dajesz Lelince 1000 mithrilowych monet.")]
+    [InlineData("Uwolniona dusza paladyna daje ci pare wskazowek do umiejetnosci 'dualwield style' w zamian za 46 miedzianych, 11 srebrnych, 10 zlotych i 5 mithrilowych monet.")]
+    public void DoesNotTreatMoneyOnlyMessagesAsInventoryMutations(string line)
+    {
+        Assert.False(EquipmentInventorySnapshotParser.IsInventoryMutationMessage(line));
+        Assert.Null(EquipmentInventorySnapshotParser.GetInventoryMutationKind(line));
+    }
+
+    [Fact]
+    public void RecognizesWaterSourcesAndFlasksByWordsInTheirNames()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsGroundWaterSource("Mala fontanna tryska swieza woda na srodku placu"));
+        Assert.True(EquipmentInventorySnapshotParser.IsGroundWaterSource("Kamienna studnia stoi tutaj"));
+        Assert.False(EquipmentInventorySnapshotParser.IsGroundWaterSource("Kamienna misa stoi tutaj"));
+        Assert.True(EquipmentInventorySnapshotParser.IsInventoryFlask("skorzany buklak"));
+        Assert.False(EquipmentInventorySnapshotParser.IsInventoryFlask("butelka"));
+    }
+
+    [Fact]
+    public void BiurkoIsACandidateGroundContainerButNotConfirmedByItsName()
+    {
+        Assert.True(EquipmentInventorySnapshotParser.IsPotentialGroundContainer("Stare biurko stoi tutaj"));
+    }
+
+    [Theory]
     [InlineData("Podnosisz koral.", InventoryMutationKind.Added)]
     [InlineData("Kupujesz zdobione lustro.", InventoryMutationKind.Added)]
     [InlineData("Upuszczasz koral.", InventoryMutationKind.Removed)]

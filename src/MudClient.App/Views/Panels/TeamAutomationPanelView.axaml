@@ -57,6 +57,20 @@
           </StackPanel>
 
           <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmHealOrderEnabled}"
+                      Content="Ordery lecznicze — każ drużynie się leczyć, gdy moje HP spadnie poniżej progu farmy" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Podczas autofarmy: gdy Twoje HP spadnie poniżej „Progu HP” ustawionego w panelu Farmy, klient wyśle poniższe komendy jako „order &lt;członek&gt; &lt;komenda&gt;” do każdego innego członka drużyny (raz na spadek HP — nie spamuje, dopóki nie wrócisz powyżej progu). Wymaga bycia liderem drużyny GMCP, tak jak zwykłe „order” — jeśli nie jesteś liderem, użyj zamiast tego „Zdalnego sterowania” poniżej." />
+            <TextBox MinHeight="64"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Np. cast 'cure critical'"
+                     Text="{Binding AutoFarmHealOrderCommandsText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Możesz wpisać wiele wierszy lub rozdzielić komendy separatorem ustawionym w opcjach klienta — każda zostanie wysłana do każdego członka drużyny." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
             <CheckBox IsChecked="{Binding RemoteControlEnabled}"
                       Content="Zdalne sterowanie — wykonuj polecenia z „!” od drugiej postaci" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"

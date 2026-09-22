@@ -929,4 +929,225 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // TryAutoFarmHealOrderGroup — "Ordery lecznicze" (Automaty → Drużyna)
+    // ====================================================================
+
+    private static CharacterGroupUpdate LeaderAndCompanion(string leaderName) => new(leaderName,
+    [
+        new(leaderName, null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+        new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+    ]);
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_HpBelowThreshold_OrdersEveryOtherMember()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("order Companion cast 'cure critical'"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_HpAboveThreshold_DoesNotOrder()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            SetPrivateField(viewModel, "_latestHp", 100);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("order Companion"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_AutoFarmNotActive_DoesNotOrder()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("order Companion"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_StaysBelowThreshold_OnlyOrdersOnce()
+    {
+        // Debounced via _autoFarmHealOrderSent — must not spam an order on every single tick while
+        // HP is still recovering, only once per dip.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(output, line => line.Contains("order Companion cast 'cure critical'"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_RecoversThenDipsAgain_OrdersAgain()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+
+            SetPrivateField(viewModel, "_latestHp", 100);
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+
+            SetPrivateField(viewModel, "_latestHp", 10);
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, output.Count(line => line.Contains("order Companion cast 'cure critical'")));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_NotTheLeader_DoesNotOrder()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Companion"));
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderEnabled = true;
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("order Companion"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmHealOrderGroup_Disabled_DoesNotOrder()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+
+            InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("order Companion"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

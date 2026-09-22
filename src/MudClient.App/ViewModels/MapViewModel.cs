@@ -132,6 +132,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private readonly RelayCommand _createMapAreaCommand;
     private readonly AsyncRelayCommand _saveMapEditorCommand;
     private readonly RelayCommand _clearAutoFarmRegionCommand;
+    private readonly RelayCommand<FarmRegionSummary> _removeAutoFarmRegionCommand;
     private MapEditorSession? _mapEditor;
 
     public MapViewModel(
@@ -219,6 +220,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         _createMapAreaCommand = new RelayCommand(CreateMapAreaFromInput, CanCreateMapAreaFromInput);
         _saveMapEditorCommand = new AsyncRelayCommand(SaveMapEditorAsync, () => _mapEditor?.IsDirty == true);
         _clearAutoFarmRegionCommand = new RelayCommand(ClearAutoFarmRegion, () => AutoFarmRegions.Count > 0);
+        _removeAutoFarmRegionCommand = new RelayCommand<FarmRegionSummary>(RemoveAutoFarmRegion);
     }
 
     public event Action? CenterOnCurrentRoomRequested;
@@ -281,6 +283,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
 
     public IRelayCommand ClearAutoFarmRegionCommand => _clearAutoFarmRegionCommand;
 
+    public IRelayCommand<FarmRegionSummary> RemoveAutoFarmRegionCommand => _removeAutoFarmRegionCommand;
+
     public string NewMapAreaName
     {
         get => _newMapAreaName;
@@ -315,6 +319,11 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
                 RefreshSpellMobMarkers();
                 RefreshSearchEntries();
                 RefreshRoomMarkers();
+                // Per-region room counts in AutoFarmRegionStatusText/AutoFarmRegionSummaries
+                // depend on the map being loaded — refresh them too, in case regions were
+                // already restored (profile load) before the map finished loading.
+                OnPropertyChanged(nameof(AutoFarmRegionStatusText));
+                OnPropertyChanged(nameof(AutoFarmRegionSummaries));
             }
         }
     }
@@ -562,6 +571,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             if (SetProperty(ref _autoFarmRegions, value))
             {
                 OnPropertyChanged(nameof(AutoFarmRegionStatusText));
+                OnPropertyChanged(nameof(AutoFarmRegionSummaries));
                 _clearAutoFarmRegionCommand.NotifyCanExecuteChanged();
                 AutoFarmRegionsChanged?.Invoke(value);
             }
@@ -623,6 +633,20 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         }
     }
 
+    /// <summary>One row per <see cref="AutoFarmRegions"/> entry, numbered and with its own room
+    /// count, for a per-region "usuń" list — <see cref="AutoFarmRegionStatusText"/> only ever
+    /// aggregates, so a list of several regions couldn't otherwise be told apart to remove just
+    /// one.</summary>
+    public IReadOnlyList<FarmRegionSummary> AutoFarmRegionSummaries => AutoFarmRegions
+        .Select((region, index) =>
+        {
+            var count = MapIndex is null ? 0 : FarmTraversalPlanner.CountTotal(MapIndex, [region], AutoFarmExcludedRoomIds);
+            return new FarmRegionSummary(
+                region,
+                $"{index + 1}. obszar {region.AreaId}, poziom {region.Z:0.##} — {count} pokoi");
+        })
+        .ToArray();
+
     /// <summary>Called by MapPanelView's code-behind when a right-drag on the map finishes while
     /// <see cref="IsDefiningAutoFarmRegion"/> was on — adds it alongside any regions already
     /// drawn instead of replacing them, so a run can cover several separate areas of the map.</summary>
@@ -636,6 +660,26 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     {
         IsDefiningAutoFarmRegion = false;
         AutoFarmRegions = [];
+    }
+
+    /// <summary>Removes just the one region behind <paramref name="summary"/> — bound to each row's
+    /// own "usuń" button (see <see cref="AutoFarmRegionSummaries"/>), unlike
+    /// <see cref="ClearAutoFarmRegion"/> which wipes all of them. <see cref="FarmRegion"/> is a
+    /// value type with no id of its own, so this removes by value (the first structural match) —
+    /// harmless even for two identically-drawn regions, since either is indistinguishable from the
+    /// other and removing "a" match leaves the same net set of covered rooms either way.</summary>
+    public void RemoveAutoFarmRegion(FarmRegionSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        var regions = _autoFarmRegions.ToList();
+        if (regions.Remove(summary.Region))
+        {
+            AutoFarmRegions = regions;
+        }
     }
 
     /// <summary>Bulk-replaces every region at once — used only when reloading from the active
@@ -1083,22 +1127,6 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             return;
         }
 
-        OnMarkersChanged();
-    }
-
-    /// <summary>Auto-applies the "X" (Zamknięte) marker to <paramref name="vnum"/> after autowalk
-    /// gives up trying to get through a door there (see <see cref="MainWindowViewModel"/>'s autowalk
-    /// stuck-step recovery) — the same exclusion a player would set by hand, so the room drops out
-    /// of future auto-farm routing via <see cref="AutoFarmExcludedRoomIds"/> without needing any
-    /// separate exclusion mechanism. Never overwrites a marker the player already placed there.</summary>
-    public void MarkRoomClosed(string? vnum)
-    {
-        if (string.IsNullOrWhiteSpace(vnum) || _markersByVnum.ContainsKey(vnum))
-        {
-            return;
-        }
-
-        _markersByVnum[vnum] = new MapMarker(vnum, "X");
         OnMarkersChanged();
     }
 

@@ -150,6 +150,15 @@ public sealed class ProfileData
     /// casts.</summary>
     public List<AutoFarmCastSpell> AutoFarmCastSequence { get; set; } = [];
 
+    /// <summary>Skills auto-farm uses the moment combat actually starts (not on plain room entry),
+    /// in this exact order — the skill counterpart of <see cref="AutoFarmCastSequence"/> for
+    /// characters who fight with combat skills instead of, or alongside, spells. Unlike a spell, a
+    /// skill never needs memorization, so readiness is entirely a cooldown question (Char.Skills.Timeout).
+    /// A self entry is used on self and skipped once already an active affect; an offensive entry is
+    /// aimed at whichever mob GMCP Room.People currently reports the character fighting, and always
+    /// fires once off cooldown.</summary>
+    public List<AutoFarmSkill> AutoFarmSkillSequence { get; set; } = [];
+
     /// <summary>Per-character automation/preference toggles (autostand, autoscan, ...). Null means
     /// this profile predates per-profile automation settings — see
     /// <see cref="ProfileAutomationSettings"/> for the one-time migration fallback.</summary>

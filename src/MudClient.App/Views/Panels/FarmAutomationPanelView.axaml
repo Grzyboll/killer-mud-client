@@ -98,6 +98,17 @@
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                        Text="Gdy tylko rozpocznie się walka (nie samo wejście do pokoju), farma pomija buffy, które już są aktywne, i rzuca resztę po kolei na siebie. Linia zaczynająca się od „!” to zaklęcie ofensywne — leci w przeciwnika, z którym akurat walczysz, i rzucane jest zawsze (bez sprawdzania aktywnych efektów). Jeśli któregoś brakuje w pamięci, farma zadba o to wcześniej — przy wejściu do pokoju przerywa chodzenie, memuje i odpoczywa, tak samo jak przy zaklęciu leczącym — więc w trakcie walki nic nie musi memować." />
           </StackPanel>
+
+          <StackPanel Spacing="3">
+            <TextBlock Classes="mud-label" Text="Umiejętności uruchamiane po zaatakowaniu przeciwnika (w tej kolejności)" />
+            <TextBox Text="{Binding AutoFarmSkillsText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     Height="70"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jedna umiejętność na linię, w kolejności użycia&#x0a;np. berserk&#x0a;!kick" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="To samo co zaklęcia powyżej, ale dla umiejętności (np. kopnięcie) zamiast czarów — bez memowania: umiejętność jest gotowa, gdy tylko zejdzie z odnowienia. Gdy tylko rozpocznie się walka i dalej przez cały jej czas (w miarę jak kolejne umiejętności schodzą z odnowienia), farma pomija te już aktywne na sobie i używa reszty po kolei. Linia zaczynająca się od „!” to umiejętność ofensywna — leci w przeciwnika, z którym akurat walczysz, i używana jest zawsze, gdy tylko gotowa; bez „!” to umiejętność użyta na sobie (np. berserk), pomijana, gdy już aktywna." />
+          </StackPanel>
         </StackPanel>
       </Border>
 

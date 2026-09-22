@@ -70,6 +70,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// spell) several skills can be in flight — see that policy constant's own xmldoc for why it
     /// exists.</summary>
     private readonly Dictionary<string, DateTimeOffset> _lastAutoFarmSkillUseAt = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Debounces <see cref="TryAutoFarmHealOrderGroup"/> to once per HP dip below the
+    /// farm's threshold — cleared once HP recovers above it (or the farm stops), so a later dip
+    /// orders the group again.</summary>
+    private bool _autoFarmHealOrderSent;
     private readonly AutoAssistPolicy _autoAssist = new();
     private readonly GroupExhaustionRefreshPolicy _groupExhaustionRefresh = new();
     private readonly ProfileService _profiles;
@@ -2399,6 +2403,39 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public bool AutoFarmHealOrderEnabled
+    {
+        get => _profileSettings.AutoFarmHealOrderEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmHealOrderEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmHealOrderEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    public string AutoFarmHealOrderCommandsText
+    {
+        get => _profileSettings.AutoFarmHealOrderCommandsText;
+        set
+        {
+            var commands = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoFarmHealOrderCommandsText, commands, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmHealOrderCommandsText = commands;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public bool AutoStandOnLyingEnabled
     {
         get => _profileSettings.AutoStandOnLyingEnabled;
@@ -2847,6 +2884,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoMirrorLeaderPositionEnabled));
         OnPropertyChanged(nameof(AutoGroupRefreshOnExhaustedEnabled));
         OnPropertyChanged(nameof(AutoAssistNpcEnabled));
+        OnPropertyChanged(nameof(AutoFarmHealOrderEnabled));
+        OnPropertyChanged(nameof(AutoFarmHealOrderCommandsText));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
@@ -5401,6 +5440,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         // Rooms the stuck-step backstop skipped are scoped the same way — see
         // _autoFarmSessionExcludedRoomIds' own doc comment for why this must NOT persist.
         _autoFarmSessionExcludedRoomIds = [];
+        _autoFarmHealOrderSent = false;
 
         if (_autowalkPath is not null)
         {
@@ -6887,6 +6927,64 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         return BuildOtherGroupMemberNames(group, selfName)
             .Select(name => $"order {name} {command}")
+            .ToArray();
+    }
+
+    /// <summary>While auto-farm is running, orders every other group member to run each configured
+    /// heal command as soon as this character's own HP drops below the farm's HP threshold — the
+    /// group-facing counterpart of <see cref="_autoFarmHpThresholdPercent"/>, which already makes
+    /// the farm itself wait for this character's own HP (see <see cref="ContinueAutoFarm"/>'s
+    /// <c>needsHealRecovery</c> check). Fires once per HP dip, not every Char.Vitals tick, via
+    /// <see cref="_autoFarmHealOrderSent"/> — re-arms once HP recovers back above the threshold.
+    /// Only actually sends anything while this character is the group's own GMCP leader, same
+    /// restriction as <see cref="TryAutoOrderGroupPosition"/> (the "order" command itself enforces
+    /// this MUD-side; see the "Zdalne sterowanie" fallback in TeamAutomationPanelView for the
+    /// non-leader case).</summary>
+    private void TryAutoFarmHealOrderGroup()
+    {
+        if (!_autoFarmActive || !IsConnected)
+        {
+            return;
+        }
+
+        if (!HealthRecoveryPolicy.IsBelowThreshold(_latestHp, _latestMaxHp, _autoFarmHpThresholdPercent))
+        {
+            _autoFarmHealOrderSent = false;
+            return;
+        }
+
+        if (_autoFarmHealOrderSent)
+        {
+            return;
+        }
+
+        var healCommands = CommandStacker.Split(AutoFarmHealOrderCommandsText, CommandStackingSeparator);
+        var orders = BuildAutoFarmHealOrderCommands(
+            _latestGroupUpdate, _latestCharacterName, healCommands, AutoFarmHealOrderEnabled);
+        if (orders.Count == 0)
+        {
+            return;
+        }
+
+        _autoFarmHealOrderSent = true;
+        QueueTriggeredCommands(orders);
+    }
+
+    /// <summary>Pure decision behind <see cref="TryAutoFarmHealOrderGroup"/>: an "order &lt;name&gt;
+    /// &lt;command&gt;" for every configured heal command, for every other group member, in turn —
+    /// empty unless <paramref name="enabled"/>, there's at least one configured command, and we're
+    /// the group's own leader (mirrors <see cref="BuildGroupPositionOrderCommands"/>).</summary>
+    internal static IReadOnlyList<string> BuildAutoFarmHealOrderCommands(
+        CharacterGroupUpdate? group, string? selfName, IReadOnlyList<string> healCommands, bool enabled)
+    {
+        if (!enabled || healCommands.Count == 0 || group is null
+            || !string.Equals(group.Leader, selfName, StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        return BuildOtherGroupMemberNames(group, selfName)
+            .SelectMany(name => healCommands.Select(command => $"order {name} {command}"))
             .ToArray();
     }
 
@@ -11171,6 +11269,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // Re-checks the skill sequence on every tick, not just at combat start (see that
             // method's own xmldoc) — a skill's cooldown can clear mid-fight.
             TryAutoFarmSkillSequence();
+            TryAutoFarmHealOrderGroup();
         });
     }
 

@@ -123,6 +123,16 @@ public sealed class ProfileAutomationSettings
     /// soon as the local character's own position becomes "fighting".</summary>
     public bool AutoAssistNpcEnabled { get; set; }
 
+    /// <summary>While auto-farm is running: orders every other (non-leader-self) group member to
+    /// run <see cref="AutoFarmHealOrderCommandsText"/> as soon as this character's own HP drops
+    /// below the farm's HP threshold — same "order" fan-out as <see cref="AutoStandOrderEnabled"/>,
+    /// so it only actually sends anything while this character is the group's GMCP leader.</summary>
+    public bool AutoFarmHealOrderEnabled { get; set; }
+
+    /// <summary>Commands ordered to every other group member — see
+    /// <see cref="AutoFarmHealOrderEnabled"/>. One command per line, sent to each member in turn.</summary>
+    public string AutoFarmHealOrderCommandsText { get; set; } = string.Empty;
+
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>
     public bool AutoStandOnLyingEnabled { get; set; }

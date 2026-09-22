@@ -241,6 +241,61 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     [Fact]
+    public void BuildAutoFarmHealOrderCommands_Disabled_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: false));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_NotTheLeader_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Companion", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_NoCommandsConfigured_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(group, "Hero", [], enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_AsLeader_OrdersEveryOtherMemberWithEachCommand()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Wolf", null, string.Empty, null, string.Empty, null, null, true, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cast 'cure critical'", "cast 'cure serious'"], enabled: true);
+
+        // Only "Companion" — Wolf is an NPC and Hero is self, neither gets ordered.
+        Assert.Equal(["order Companion cast 'cure critical'", "order Companion cast 'cure serious'"], commands);
+    }
+
+    [Fact]
     public void BuildAutoAssistNpcCommands_Disabled_ReturnsEmpty()
     {
         var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>

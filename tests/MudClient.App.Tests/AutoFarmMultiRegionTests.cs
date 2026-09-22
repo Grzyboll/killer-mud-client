@@ -82,6 +82,108 @@ public sealed class AutoFarmMultiRegionTests
     }
 
     [AvaloniaFact]
+    public async Task RemoveAutoFarmRegion_OneOfTwo_RemovesOnlyThatOneRegion()
+    {
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+
+        try
+        {
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionA);
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionB);
+            var summaries = viewModel.Map.AutoFarmRegionSummaries;
+            var summaryForRegionA = Assert.Single(summaries, s => s.Region == RegionA);
+
+            viewModel.Map.RemoveAutoFarmRegion(summaryForRegionA);
+
+            Assert.Equal([RegionB], viewModel.Map.AutoFarmRegions);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task RemoveAutoFarmRegionCommand_ExecutedWithSummary_RemovesThatRegion()
+    {
+        // Exercises the actual ICommand path a "✕" button click goes through, not just the
+        // backing method directly — matches ClearAutoFarmRegion_RemovesEveryDrawnRegion's own
+        // Command.Execute(...) style below.
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+
+        try
+        {
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionA);
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionB);
+            var summaryForRegionB = Assert.Single(viewModel.Map.AutoFarmRegionSummaries, s => s.Region == RegionB);
+
+            viewModel.Map.RemoveAutoFarmRegionCommand.Execute(summaryForRegionB);
+
+            Assert.Equal([RegionA], viewModel.Map.AutoFarmRegions);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task RemoveAutoFarmRegion_NullSummary_DoesNothing()
+    {
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+
+        try
+        {
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionA);
+
+            viewModel.Map.RemoveAutoFarmRegion(null);
+
+            Assert.Equal([RegionA], viewModel.Map.AutoFarmRegions);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task AutoFarmRegionSummaries_NumbersEachRegionAndMirrorsRemovalImmediately()
+    {
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+
+        try
+        {
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionA);
+            viewModel.Map.NotifyAutoFarmRegionDrawn(RegionB);
+
+            var summaries = viewModel.Map.AutoFarmRegionSummaries;
+
+            Assert.Equal(2, summaries.Count);
+            Assert.StartsWith("1.", summaries[0].Description);
+            Assert.StartsWith("2.", summaries[1].Description);
+            Assert.Contains("obszar 1, poziom 0", summaries[0].Description);
+
+            viewModel.Map.RemoveAutoFarmRegion(summaries[0]);
+
+            var remaining = Assert.Single(viewModel.Map.AutoFarmRegionSummaries);
+            Assert.StartsWith("1.", remaining.Description);
+            Assert.Equal(RegionB, remaining.Region);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SwitchProfile_LegacySingleRegion_MigratesIntoOneEntryList()
     {
         var directory = CreateDirectory();

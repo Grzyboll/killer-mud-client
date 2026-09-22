@@ -65,6 +65,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Backs <see cref="HealthRecoveryPolicy.MinCombatHealCastInterval"/>'s floor in
     /// <see cref="TryAutoFarmCombatHeal"/> — see that policy method's xmldoc for why it exists.</summary>
     private DateTimeOffset? _lastAutoFarmCombatHealCastAt;
+    /// <summary>Backs <see cref="AutoFarmSkillSequencePolicy.MinSkillUseInterval"/>'s floor in
+    /// <see cref="TryAutoFarmSkillSequence"/>, per skill name since (unlike the single combat heal
+    /// spell) several skills can be in flight — see that policy constant's own xmldoc for why it
+    /// exists.</summary>
+    private readonly Dictionary<string, DateTimeOffset> _lastAutoFarmSkillUseAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly AutoAssistPolicy _autoAssist = new();
     private readonly GroupExhaustionRefreshPolicy _groupExhaustionRefresh = new();
     private readonly ProfileService _profiles;
@@ -251,6 +256,15 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _autoFarmPaused;
     private IReadOnlyList<FarmRegion> _autoFarmRegions = [];
     private HashSet<int> _autoFarmVisitedRoomIds = [];
+    // Rooms the stuck-step backstop (HandleAutowalkStepStuck) gave up on during THIS farm run —
+    // deliberately NOT a persisted "X" map marker (disk-saved, community-reportable), which is
+    // what this used to write via the since-removed MapViewModel.MarkRoomClosed. Plain in-memory
+    // state instead, scoped and cleared the same way _autoFarmVisitedRoomIds is: kept
+    // across a Pause, reset in StopAutoFarm. A false "stuck" call (e.g. a very long but legitimate
+    // mid-walk trigger pause outlasting AutowalkStuckStepTimeout's retries) only costs this one
+    // run skipping the room — the next farm start tries it again fresh, instead of a permanently
+    // wrong map annotation nobody remembers to undo.
+    private HashSet<int> _autoFarmSessionExcludedRoomIds = [];
     // Full visiting order planned once at StartAutoFarm via FarmTraversalPlanner.BuildVisitOrder
     // (nearest-neighbor + 2-opt) — see PickNextAutoFarmRoom, which consumes it instead of
     // FindNearestUnvisitedRoom's old per-arrival greedy pick.
@@ -290,6 +304,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private List<string> _autoFarmHealSpellNames = [];
     private List<AutoFarmMemSpell> _autoFarmMemSpells = [];
     private List<AutoFarmCastSpell> _autoFarmCastSequence = [];
+    private List<AutoFarmSkill> _autoFarmSkillSequence = [];
     private string _autoFarmStatusText = "Farma nieaktywna.";
     private CancellationTokenSource? _bookRefreshCts;
     private CancellationTokenSource? _rareRefreshCts;
@@ -4563,19 +4578,24 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             var stuckRoom = _autowalkPath.Steps[step].ToRoom;
             var stuckCommand = _autowalkPath.Steps[step].Command;
             _autowalkStuckRecoveryAttempts = 0;
-            Map.MarkRoomClosed(stuckRoom.Vnum);
 
             if (_autoFarmActive)
             {
+                // Session-scoped only (see _autoFarmSessionExcludedRoomIds) — deliberately not a
+                // permanent, disk-saved, community-reportable "X" map marker. A client-side
+                // timeout is a heuristic, not a confirmed "this door is closed forever" — if it
+                // really is, the player can mark it by hand after checking in-game, the same way
+                // any other map marker gets placed.
+                _autoFarmSessionExcludedRoomIds.Add(stuckRoom.Id);
                 EmitSystem(
-                    $"Autowalk: krok „{stuckCommand}” nie przechodzi — oznaczam pokój jako zamknięty i kontynuuję farmę.", 33);
-                StopAutowalk("Farma: przejście zablokowane — pokój oznaczony jako zamknięty, kontynuuję.", "info");
+                    $"Autowalk: krok „{stuckCommand}” nie przechodzi — pomijam ten pokój do końca bieżącego biegu farmy.", 33);
+                StopAutowalk("Farma: przejście zablokowane — pomijam pokój w tym biegu, kontynuuję.", "info");
                 ContinueAutoFarm();
             }
             else
             {
                 StopAutowalk(
-                    "Autowalk przerwany: krok nie przechodzi mimo prób otwarcia przejścia (zablokowane drzwi?). Pokój oznaczony jako zamknięty. Wpisz /walk, aby spróbować dalej.",
+                    "Autowalk przerwany: krok nie przechodzi mimo prób otwarcia przejścia (zablokowane drzwi?). Jeśli to trwałe, oznacz pokój ręcznie na mapie. Wpisz /walk, aby spróbować dalej.",
                     "error",
                     resumable: true);
             }
@@ -5222,6 +5242,64 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         return result;
     }
 
+    /// <summary>One skill name per line, in the exact order they should be used — the skill
+    /// counterpart of <see cref="AutoFarmCastSpellsText"/> for characters who fight with combat
+    /// skills instead of, or alongside, spells (see <see cref="TryAutoFarmSkillSequence"/>/
+    /// <see cref="AutoFarmSkillSequencePolicy.GetSkillsNeedingUse"/>). Unlike a spell entry, a skill
+    /// never needs memorization — readiness is entirely a cooldown question — so there's no
+    /// maintenance-pass counterpart to <see cref="ContinueAutoFarm"/>'s <c>missingCastSpellsToMem</c>
+    /// for this list. A leading "!" marks the entry offensive — aimed at whichever mob the character
+    /// is currently fighting instead of self, and always used once off cooldown (no "already active"
+    /// check makes sense for an attack skill); without it, the entry is a self-used skill (e.g. a
+    /// self-buff like "berserk"), skipped once already an active affect.</summary>
+    public string AutoFarmSkillsText
+    {
+        get => string.Join('\n', _autoFarmSkillSequence.Select(
+            skill => skill.Offensive ? $"!{skill.Name}" : skill.Name));
+        set
+        {
+            var entries = ParseAutoFarmSkillLines(value);
+            if (_autoFarmSkillSequence.SequenceEqual(entries))
+            {
+                return;
+            }
+
+            _autoFarmSkillSequence = entries;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>Parses <see cref="AutoFarmSkillsText"/>: one name per line, trimmed, deduplicated
+    /// case-insensitively (first occurrence wins), a leading "!" marking the entry offensive instead
+    /// of a self-used skill.</summary>
+    private static List<AutoFarmSkill> ParseAutoFarmSkillLines(string? text)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<AutoFarmSkill>();
+
+        foreach (var rawLine in (text ?? string.Empty).Split(
+                     ['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var offensive = false;
+            var name = rawLine;
+            if (name.StartsWith('!'))
+            {
+                offensive = true;
+                name = name[1..].Trim();
+            }
+
+            if (name.Length == 0 || !seen.Add(name))
+            {
+                continue;
+            }
+
+            result.Add(new AutoFarmSkill(name, offensive));
+        }
+
+        return result;
+    }
+
     /// <summary>Parses <see cref="AutoFarmMemSpellsText"/>: one name per line, trimmed,
     /// deduplicated case-insensitively (first occurrence wins), a leading "~" marking the entry
     /// opportunistic instead of required.</summary>
@@ -5292,8 +5370,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         _autoFarmActive = true;
         _autoFarmVisitedRoomIds = [currentRoom.Id];
+        _autoFarmSessionExcludedRoomIds = [];
         _autoFarmVisitOrder = FarmTraversalPlanner.BuildVisitOrder(
-            pathfinder, index, _autoFarmRegions, currentRoom.Id, Map.AutoFarmExcludedRoomIds);
+            pathfinder, index, _autoFarmRegions, currentRoom.Id, GetEffectiveAutoFarmExcludedRoomIds());
         _autoFarmHealRecoveryAttempts = 0;
         OnPropertyChanged(nameof(IsAutoFarmActive));
         AutoFarmStatusText = "Farma uruchomiona.";
@@ -5319,6 +5398,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         RefreshCommands();
         // The yellow "visited" coloring is scoped to this farm run only — clear it on stop.
         Map.AutoFarmVisitedRoomIds = new HashSet<int>();
+        // Rooms the stuck-step backstop skipped are scoped the same way — see
+        // _autoFarmSessionExcludedRoomIds' own doc comment for why this must NOT persist.
+        _autoFarmSessionExcludedRoomIds = [];
 
         if (_autowalkPath is not null)
         {
@@ -5373,6 +5455,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// snapshot so the map can color every visited room yellow while the farm runs.</summary>
     private void PushAutoFarmVisitedRoomIds() =>
         Map.AutoFarmVisitedRoomIds = new HashSet<int>(_autoFarmVisitedRoomIds);
+
+    /// <summary>Rooms auto-farm must route around right now: the player's own manually-placed
+    /// markers (<see cref="MapViewModel.AutoFarmExcludedRoomIds"/> — "X"/"#"/"!"/"!!", permanent)
+    /// unioned with this run's own stuck-step skips (<see cref="_autoFarmSessionExcludedRoomIds"/>
+    /// — temporary, cleared on <see cref="StopAutoFarm"/>). Recomputed on every call rather than
+    /// cached, same as the Map property it wraps.</summary>
+    private HashSet<int> GetEffectiveAutoFarmExcludedRoomIds()
+    {
+        var excluded = new HashSet<int>(Map.AutoFarmExcludedRoomIds);
+        excluded.UnionWith(_autoFarmSessionExcludedRoomIds);
+        return excluded;
+    }
 
     /// <summary>Picks the farm's next move: HP/required-spell/cast-sequence-buff maintenance first
     /// (see <see cref="MaintainAutoFarmAndContinueAsync"/> — this is also where a self-buff that
@@ -5463,7 +5557,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         _autoFarmVisitedRoomIds.Add(currentRoom.Id);
         PushAutoFarmVisitedRoomIds();
-        var excludedRoomIds = Map.AutoFarmExcludedRoomIds;
+        var excludedRoomIds = GetEffectiveAutoFarmExcludedRoomIds();
 
         var next = PickNextAutoFarmRoom(pathfinder, index, currentRoom, excludedRoomIds);
         if (next is null)
@@ -5560,6 +5654,64 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             {
                 commands.Add($"cast \"{spell.Name}\" self");
             }
+        }
+
+        if (commands.Count > 0)
+        {
+            QueueTriggeredCommands(commands);
+        }
+    }
+
+    /// <summary>Fires <see cref="_autoFarmSkillSequence"/> — the skill counterpart of
+    /// <see cref="TryAutoFarmCastSequence"/> for characters who fight with combat skills instead of,
+    /// or alongside, spells. Called both at the same "fighting" transition the spell version is
+    /// (<see cref="UpdateCharacterPosition"/>) and on every Char.Vitals tick while still fighting
+    /// (alongside <see cref="TryAutoFarmCombatHeal"/>), since — unlike a spell, which is only ever
+    /// (re)cast at combat start here — a skill's cooldown can clear mid-fight and should fire again
+    /// right away rather than waiting for the next fight to start. Only ever used while actually
+    /// fighting: a self entry used outside combat would just be wasted skill spam with nothing to
+    /// show for it. An offensive entry targets whichever mob GMCP Room.People currently reports the
+    /// character fighting, exactly like <see cref="TryAutoFarmCastSequence"/>'s own offensive
+    /// entries — skipped entirely, not mis-used on self, if that isn't known yet.</summary>
+    private void TryAutoFarmSkillSequence()
+    {
+        if (!_autoFarmActive ||
+            !string.Equals(_latestCharacterPosition, "fighting", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var skillsToUse = AutoFarmSkillSequencePolicy.GetSkillsNeedingUse(
+            _autoFarmSkillSequence, _activeAffectNames, _lastSkillTimeouts, now, _lastAutoFarmSkillUseAt);
+        if (skillsToUse.Count == 0)
+        {
+            return;
+        }
+
+        var enemyName = _latestRoomPeople
+            .FirstOrDefault(person => string.Equals(
+                person.Name, _latestCharacterName, StringComparison.OrdinalIgnoreCase))
+            ?.Enemy;
+
+        var commands = new List<string>();
+        foreach (var skill in skillsToUse)
+        {
+            if (skill.Offensive)
+            {
+                if (string.IsNullOrWhiteSpace(enemyName))
+                {
+                    continue;
+                }
+
+                commands.Add($"{skill.Name} {enemyName}");
+            }
+            else
+            {
+                commands.Add(skill.Name);
+            }
+
+            _lastAutoFarmSkillUseAt[skill.Name] = now;
         }
 
         if (commands.Count > 0)
@@ -7246,11 +7398,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             : profile.AutoFarmCastSpells
                 .Select(name => new AutoFarmCastSpell(name, Offensive: false))
                 .ToList();
+        _autoFarmSkillSequence = profile.AutoFarmSkillSequence.ToList();
         OnPropertyChanged(nameof(AutoFarmHpThresholdPercent));
         OnPropertyChanged(nameof(AutoFarmStepDelayMilliseconds));
         OnPropertyChanged(nameof(AutoFarmHealSpellNamesText));
         OnPropertyChanged(nameof(AutoFarmMemSpellsText));
         OnPropertyChanged(nameof(AutoFarmCastSpellsText));
+        OnPropertyChanged(nameof(AutoFarmSkillsText));
         StartAutoFarmCommand.NotifyCanExecuteChanged();
 
         var persistedSets = profile.BuffSets ?? [];
@@ -7588,6 +7742,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             AutoFarmHealSpellNames = _autoFarmHealSpellNames.ToList(),
             AutoFarmMemSpells = _autoFarmMemSpells.ToList(),
             AutoFarmCastSequence = _autoFarmCastSequence.ToList(),
+            AutoFarmSkillSequence = _autoFarmSkillSequence.ToList(),
             RequiredBuffs = RequiredBuffs.Select(b => b.Name).ToList(),
             BuffSets = BuffSets.Select(set => new ProfileBuffSet
             {
@@ -10456,6 +10611,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _autoAssistNpcPending = true;
             TryAutoAssistNpcIfConfirmed();
             Dispatcher.UIThread.Post(TryAutoFarmCastSequence);
+            Dispatcher.UIThread.Post(TryAutoFarmSkillSequence);
             Dispatcher.UIThread.Post(() => CombatStateChanged?.Invoke(true));
         }
 
@@ -11012,6 +11168,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // _lastSkillTimeouts, which — like SkillsOnCooldown — is only ever touched on the UI
             // thread (see OnSkillTimeoutsChanged).
             TryAutoFarmCombatHeal();
+            // Re-checks the skill sequence on every tick, not just at combat start (see that
+            // method's own xmldoc) — a skill's cooldown can clear mid-fight.
+            TryAutoFarmSkillSequence();
         });
     }
 

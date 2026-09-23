@@ -48,6 +48,9 @@ public sealed class AppSettingsService
                 settings.WidgetFontFamily = AppSettings.DefaultWidgetFontFamily;
             }
 
+            settings.TerminalMaxLines = Math.Clamp(
+                settings.TerminalMaxLines, AppSettings.MinTerminalMaxLines, AppSettings.MaxTerminalMaxLines);
+
             if (!AnsiColorPalette.IsKnown(settings.TelnetColorScheme))
             {
                 settings.TelnetColorScheme = AppSettings.DefaultTelnetColorScheme;

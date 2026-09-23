@@ -208,6 +208,26 @@ public sealed class AppSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Load_OutOfRangeTerminalMaxLines_ClampsToLimits()
+    {
+        SaveRaw(new AppSettings { TerminalMaxLines = 5 });
+
+        var settings = _service.Load();
+
+        Assert.Equal(AppSettings.MinTerminalMaxLines, settings.TerminalMaxLines);
+    }
+
+    [Fact]
+    public void Load_TerminalMaxLinesAboveLimit_ClampsToMaximum()
+    {
+        SaveRaw(new AppSettings { TerminalMaxLines = 999_999 });
+
+        var settings = _service.Load();
+
+        Assert.Equal(AppSettings.MaxTerminalMaxLines, settings.TerminalMaxLines);
+    }
+
+    [Fact]
     public void Load_WhitespaceOverlayPanelId_IsDropped()
     {
         SaveRaw(new AppSettings

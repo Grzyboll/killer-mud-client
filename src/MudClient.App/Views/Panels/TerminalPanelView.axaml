@@ -46,7 +46,8 @@
                               OutputFontSize="{Binding OutputFontSize}"
                               OutputFontWeight="{Binding OutputFontWeight}"
                               TelnetColorScheme="{Binding TelnetColorScheme}"
-                              WordWrap="{Binding OutputWordWrap}" />
+                              WordWrap="{Binding OutputWordWrap}"
+                              MaxOutputLines="{Binding TerminalMaxLines}" />
 
       <!-- Scoped to the output row specifically (not the whole Panel below) so neither overlay
            column can ever grow tall enough to reach behind the timer strip or command bar — see

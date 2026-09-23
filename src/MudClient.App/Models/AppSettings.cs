@@ -47,12 +47,26 @@ public sealed class AppSettings
     /// <summary>Default for <see cref="CommandStackingSeparator"/>.</summary>
     public const string DefaultCommandStackingSeparator = ";";
 
+    /// <summary>Default/limits for the terminal's scrollback ring buffer, in lines (see
+    /// <see cref="TerminalMaxLines"/>). The default matches <see cref="Controls.MudOutputView"/>'s
+    /// own fallback, so an unset/legacy settings file behaves exactly as before this setting
+    /// existed.</summary>
+    public const int DefaultTerminalMaxLines = 10_000;
+    public const int MinTerminalMaxLines = 1_000;
+    public const int MaxTerminalMaxLines = 100_000;
+
     /// <summary>Font used for text received from the MUD in the main output view.</summary>
     public string OutputFontFamily { get; set; } = DefaultOutputFontFamily;
 
     public double OutputFontSize { get; set; } = DefaultOutputFontSize;
 
     public bool OutputFontBold { get; set; }
+
+    /// <summary>How many lines of scrollback the terminal keeps before the oldest ones drop off
+    /// the top — see <see cref="Controls.MudOutputView.MaxOutputLines"/>. Higher keeps more
+    /// history in memory; changing it clears the terminal's current scrollback (see that
+    /// property's own xmldoc for why).</summary>
+    public int TerminalMaxLines { get; set; } = DefaultTerminalMaxLines;
 
     /// <summary>Font shared by all dockable widgets except the terminal.</summary>
     public string WidgetFontFamily { get; set; } = DefaultWidgetFontFamily;

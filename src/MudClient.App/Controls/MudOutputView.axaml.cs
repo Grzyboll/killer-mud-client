@@ -39,6 +39,9 @@ public partial class MudOutputView : UserControl
         AvaloniaProperty.Register<MudOutputView, string>(
             nameof(TelnetColorScheme), AnsiColorPalette.Warm);
 
+    public static readonly StyledProperty<int> MaxOutputLinesProperty =
+        AvaloniaProperty.Register<MudOutputView, int>(nameof(MaxOutputLines), MaximumLines);
+
     public FontFamily OutputFontFamily
     {
         get => GetValue(OutputFontFamilyProperty);
@@ -69,10 +72,21 @@ public partial class MudOutputView : UserControl
         set => SetValue(TelnetColorSchemeProperty, value);
     }
 
+    /// <summary>Ring buffer capacity in lines — see <see cref="MaxOutputLinesProperty"/>'s own
+    /// xmldoc for how changing it at runtime is handled.</summary>
+    public int MaxOutputLines
+    {
+        get => GetValue(MaxOutputLinesProperty);
+        set => SetValue(MaxOutputLinesProperty, value);
+    }
+
+    /// <summary>Default/fallback ring buffer capacity — see <see cref="Models.AppSettings.DefaultTerminalMaxLines"/>
+    /// (the two are meant to stay in sync so an unset/unbound view behaves the same as the
+    /// settings default).</summary>
     private const int MaximumLines = 10_000;
 
     private readonly AnsiStreamParser _parser = new();
-    private readonly OutputBuffer _buffer = new(MaximumLines);
+    private OutputBuffer _buffer = new(MaximumLines);
     private readonly ScrollViewer _scrollbackScroller;
     private readonly ScrollViewer _liveTailScroller;
     private readonly OutputPaneControl _scrollbackPane;
@@ -178,6 +192,30 @@ public partial class MudOutputView : UserControl
         {
             _parser.SetColorScheme(TelnetColorScheme);
         }
+        else if (change.Property == MaxOutputLinesProperty && _scrollbackPane is not null)
+        {
+            SetMaxLines(MaxOutputLines);
+        }
+    }
+
+    /// <summary>Reallocates the ring buffer to a new capacity — the settings slider's own
+    /// "Ustawienia" xmldoc explains why this is a hard reset (a fresh, empty buffer) rather than
+    /// an in-place resize that keeps the most recent lines: <see cref="OutputPaneControl"/> caches
+    /// per-line height/layout state keyed off the buffer's own internal ring positions, and this
+    /// setting changes rarely enough (a deliberate settings action, not a hot path) that losing
+    /// scrollback once is a fair trade against the risk of subtly corrupting that cache. A no-op
+    /// if the capacity isn't actually changing.</summary>
+    private void SetMaxLines(int maxLines)
+    {
+        var capacity = Math.Max(2, maxLines);
+        if (capacity == _buffer.Capacity)
+        {
+            return;
+        }
+
+        _buffer = new OutputBuffer(capacity);
+        _scrollbackPane.Buffer = _buffer;
+        _liveTailPane.Buffer = _buffer;
     }
 
     private void OnFontApplyTimerTick(object? sender, EventArgs e)

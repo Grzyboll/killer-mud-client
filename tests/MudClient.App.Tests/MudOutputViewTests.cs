@@ -314,4 +314,55 @@ public sealed class MudOutputViewTests
         Assert.NotNull(method);
         method!.Invoke(output, [enabled]);
     }
+
+    private static object GetBuffer(MudOutputView output)
+    {
+        var field = typeof(MudOutputView).GetField("_buffer", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(field);
+        return field!.GetValue(output)!;
+    }
+
+    private static int GetBufferCapacity(object buffer) =>
+        (int)buffer.GetType().GetProperty("Capacity")!.GetValue(buffer)!;
+
+    private static int GetBufferCount(object buffer) =>
+        (int)buffer.GetType().GetProperty("Count")!.GetValue(buffer)!;
+
+    // ====================================================================
+    // MaxOutputLines — "Ile linijek pamięta terminal" (Ustawienia → Tekst z MUD-a)
+    // ====================================================================
+
+    [AvaloniaFact]
+    public void MaxOutputLines_Changed_ReallocatesBufferWithNewCapacity()
+    {
+        var view = new MudOutputView();
+
+        view.MaxOutputLines = 500;
+
+        Assert.Equal(500, GetBufferCapacity(GetBuffer(view)));
+    }
+
+    [AvaloniaFact]
+    public void MaxOutputLines_SetToSameValue_IsANoOp()
+    {
+        var view = new MudOutputView();
+        var originalBuffer = GetBuffer(view);
+
+        view.MaxOutputLines = view.MaxOutputLines;
+
+        Assert.Same(originalBuffer, GetBuffer(view));
+    }
+
+    [AvaloniaFact]
+    public void MaxOutputLines_Changed_ClearsExistingScrollback()
+    {
+        // A deliberate trade-off, not a bug — see MudOutputView.SetMaxLines' own xmldoc for why
+        // resizing the ring in place isn't done instead.
+        var view = new MudOutputView();
+        view.AppendText("linia jeden\nlinia dwa\n");
+
+        view.MaxOutputLines = 500;
+
+        Assert.Equal(1, GetBufferCount(GetBuffer(view)));
+    }
 }

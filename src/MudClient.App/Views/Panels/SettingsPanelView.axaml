@@ -114,6 +114,22 @@
                   Classes="mud-small"
                   HorizontalAlignment="Right" />
 
+          <StackPanel Spacing="3">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="mud-label" Text="Ile linijek pamięta terminal" />
+              <Border Grid.Column="1" Classes="mud-badge mud-badge-gold">
+                <TextBlock Text="{Binding TerminalMaxLinesText}" />
+              </Border>
+            </Grid>
+            <Slider Minimum="{Binding MinTerminalMaxLines}"
+                    Maximum="{Binding MaxTerminalMaxLines}"
+                    Value="{Binding TerminalMaxLines}"
+                    TickFrequency="1000"
+                    IsSnapToTickEnabled="True" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Ile ostatnich linijek terminal trzyma w pamięci, zanim najstarsze zaczną znikać z góry przy przewijaniu. Zmiana czyści bieżącą zawartość terminala." />
+          </StackPanel>
+
         </StackPanel>
       </Border>
 
@@ -194,6 +210,24 @@
                        Text="Globalny separator dla komend wpisywanych, aliasów, triggerów i timerów. Pusta wartość wyłącza składanie (tylko nowe linie). Zapisywane automatycznie." />
           </StackPanel>
 
+        </StackPanel>
+      </Border>
+
+      <TextBlock Classes="mud-heading" Text="Nagrywanie sesji" Margin="0,6,0,0" />
+      <Border Classes="mud-section" Padding="10">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                     Text="Zapisuje wszystko, co pojawia się w terminalu — tekst z MUD-a i wysyłane komendy — do zwykłego pliku tekstowego (bez kolorów ANSI), w podkatalogu „Records” katalogu ustawień. Nie jest wznawiane po ponownym uruchomieniu klienta — trzeba włączyć je od nowa." />
+          <TextBlock Text="{Binding SessionRecordingStatusText}"
+                     TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Content="Otwórz folder"
+                    Command="{Binding OpenSessionRecordingFolderCommand}"
+                    Classes="mud-small" />
+            <Button Content="{Binding SessionRecordingButtonText}"
+                    Command="{Binding ToggleSessionRecordingCommand}"
+                    Classes="mud-small" />
+          </StackPanel>
         </StackPanel>
       </Border>
 

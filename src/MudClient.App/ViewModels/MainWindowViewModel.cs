@@ -133,6 +133,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IContentUpdateService _contentUpdateService;
     private readonly IAppUpdateService _appUpdateService;
     private readonly IExternalLinkService _externalLinkService;
+    private readonly SessionRecorderService _sessionRecorder;
     private CancellationTokenSource? _contentUpdateCts;
     private Task? _contentUpdateCheckTask;
     private CancellationTokenSource? _appUpdateCts;
@@ -427,7 +428,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ArtifactTryMappingCoordinator? artifactTryMappingCoordinator = null,
         AutoRepairCoordinator? autoRepairCoordinator = null,
         AutoGetCoordinator? autoGetCoordinator = null,
-        GroupSpellStore? groupSpellStore = null)
+        GroupSpellStore? groupSpellStore = null,
+        SessionRecorderService? sessionRecorder = null)
     {
         _triggers = new TriggerEngine { Aliases = _aliases };
         _aliases.Lua = _lua;
@@ -461,6 +463,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _contentUpdateService = contentUpdateService ?? new ContentUpdateService(_settingsService.DirectoryPath);
         _appUpdateService = appUpdateService ?? new AppUpdateService();
         _externalLinkService = externalLinkService ?? new ExternalLinkService();
+        _sessionRecorder = sessionRecorder ?? new SessionRecorderService();
         Killeropedia = CreateKilleropediaViewModel();
         AutomationRules.CollectionChanged += (_, _) => OnFolderCollectionsChanged();
         Timers.CollectionChanged += (_, _) => OnFolderCollectionsChanged();
@@ -669,6 +672,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OpenAppUpdateCommand = new RelayCommand(
             () => OpenExternalLink(AvailableAppUpdate?.DownloadPageUri),
             () => AvailableAppUpdate is not null);
+        ToggleSessionRecordingCommand = new RelayCommand(ToggleSessionRecording);
+        OpenSessionRecordingFolderCommand = new RelayCommand(OpenSessionRecordingFolder);
 
         PopulateMockData();
 
@@ -787,6 +792,53 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public IAsyncRelayCommand CheckAppUpdatesCommand { get; }
 
     public IRelayCommand OpenAppUpdateCommand { get; }
+
+    public IRelayCommand ToggleSessionRecordingCommand { get; }
+
+    public IRelayCommand OpenSessionRecordingFolderCommand { get; }
+
+    /// <summary>Whether the terminal (MUD text and echoed outgoing commands alike) is currently
+    /// being written to a transcript file — see <see cref="ToggleSessionRecordingCommand"/>.</summary>
+    public bool IsRecordingSession => _sessionRecorder.IsRecording;
+
+    public string SessionRecordingButtonText => IsRecordingSession ? "Zatrzymaj nagrywanie" : "Nagrywaj sesję";
+
+    public string SessionRecordingStatusText => IsRecordingSession
+        ? $"Nagrywanie do pliku: {_sessionRecorder.CurrentFilePath}"
+        : "Nagrywanie wyłączone.";
+
+    /// <summary>Starts or stops writing everything shown in the terminal to a plain-text file
+    /// under the settings directory's "Records" subfolder, named after the active profile (or
+    /// "sesja" if none) and the current timestamp — see <see cref="SessionRecorderService"/>.
+    /// Not persisted across restarts: a fresh launch always starts with recording off.</summary>
+    private void ToggleSessionRecording()
+    {
+        if (_sessionRecorder.IsRecording)
+        {
+            _sessionRecorder.Stop();
+            OutputReceived -= _sessionRecorder.Append;
+            AddToast("Nagrywanie sesji zatrzymane.", "info");
+        }
+        else
+        {
+            var directory = Path.Combine(_settingsService.DirectoryPath, "Records");
+            var path = SessionRecorderService.BuildDefaultFilePath(directory, ActiveProfileName, DateTimeOffset.Now);
+            _sessionRecorder.Start(path);
+            OutputReceived += _sessionRecorder.Append;
+            AddToast($"Nagrywanie sesji do pliku: {path}", "info");
+        }
+
+        OnPropertyChanged(nameof(IsRecordingSession));
+        OnPropertyChanged(nameof(SessionRecordingButtonText));
+        OnPropertyChanged(nameof(SessionRecordingStatusText));
+    }
+
+    private void OpenSessionRecordingFolder()
+    {
+        var directory = Path.Combine(_settingsService.DirectoryPath, "Records");
+        Directory.CreateDirectory(directory);
+        OpenExternalLink(new Uri(directory));
+    }
 
     public ContentUpdateAvailability? AvailableContentUpdate
     {
@@ -1837,6 +1889,32 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     public FontWeight OutputFontWeight => OutputFontBold ? FontWeight.Bold : FontWeight.Normal;
+
+    public int MinTerminalMaxLines => AppSettings.MinTerminalMaxLines;
+    public int MaxTerminalMaxLines => AppSettings.MaxTerminalMaxLines;
+
+    /// <summary>How many lines of scrollback the terminal keeps — see
+    /// <see cref="Controls.MudOutputView.MaxOutputLines"/>'s own xmldoc for why changing this
+    /// clears the terminal's current scrollback.</summary>
+    public int TerminalMaxLines
+    {
+        get => _settings.TerminalMaxLines;
+        set
+        {
+            var clamped = Math.Clamp(value, AppSettings.MinTerminalMaxLines, AppSettings.MaxTerminalMaxLines);
+            if (_settings.TerminalMaxLines == clamped)
+            {
+                return;
+            }
+
+            _settings.TerminalMaxLines = clamped;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TerminalMaxLinesText));
+            SaveSettings();
+        }
+    }
+
+    public string TerminalMaxLinesText => $"{_settings.TerminalMaxLines:N0} linijek";
 
     /// <summary>Font family shared by all dockable widgets except the terminal.</summary>
     public string WidgetFontFamily
@@ -12174,6 +12252,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Map.AutoKillOnRoomEnterChanged -= OnMapAutoKillOnRoomEnterChanged;
         Map.AutoKillMobNamesChanged -= OnMapAutoKillMobNamesChanged;
         Map.AutoFarmRegionsChanged -= OnMapAutoFarmRegionsChanged;
+
+        OutputReceived -= _sessionRecorder.Append;
+        _sessionRecorder.Dispose();
 
         _autowalkCts.Cancel();
         _bookRefreshCts?.Cancel();

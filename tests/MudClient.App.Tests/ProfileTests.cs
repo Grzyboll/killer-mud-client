@@ -1,3 +1,4 @@
+using System.Reflection;
 using MudClient.App.Models;
 using MudClient.App.Services;
 using MudClient.App.ViewModels;
@@ -357,6 +358,61 @@ public sealed class ProfileTests : IDisposable
 
         vm.OutputFontSize = 1;
         Assert.Equal(AppSettings.MinOutputFontSize, vm.OutputFontSize);
+    }
+
+    [Fact]
+    public async Task Vm_ChangingTerminalMaxLines_PersistsAndClamps()
+    {
+        var settingsService = new AppSettingsService(_directory);
+        await using var vm = new MainWindowViewModel(CreateService(), settingsService);
+
+        vm.TerminalMaxLines = 20_000;
+        Assert.Equal(20_000, settingsService.Load().TerminalMaxLines);
+
+        vm.TerminalMaxLines = 1;
+        Assert.Equal(AppSettings.MinTerminalMaxLines, vm.TerminalMaxLines);
+
+        vm.TerminalMaxLines = 999_999;
+        Assert.Equal(AppSettings.MaxTerminalMaxLines, vm.TerminalMaxLines);
+    }
+
+    [Fact]
+    public async Task Vm_ToggleSessionRecording_StartsAndStopsWritingToFile()
+    {
+        await using var vm = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        var recordsDirectory = Path.Combine(_directory, "Records");
+
+        Assert.False(vm.IsRecordingSession);
+
+        vm.ToggleSessionRecordingCommand.Execute(null);
+        Assert.True(vm.IsRecordingSession);
+        Assert.True(Directory.Exists(recordsDirectory));
+        var file = Assert.Single(Directory.GetFiles(recordsDirectory));
+
+        vm.ToggleSessionRecordingCommand.Execute(null);
+        Assert.False(vm.IsRecordingSession);
+
+        // The file stays behind after stopping — only the open handle closes.
+        Assert.True(File.Exists(file));
+    }
+
+    [Fact]
+    public async Task Vm_SessionRecording_CapturesOutputReceivedText()
+    {
+        // Guards the OutputReceived += _sessionRecorder.Append wiring itself, not just the
+        // recorder in isolation (see SessionRecorderServiceTests for that).
+        await using var vm = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        vm.ToggleSessionRecordingCommand.Execute(null);
+        var file = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "Records")));
+
+        var emitSystem = typeof(MainWindowViewModel).GetMethod("EmitSystem",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(emitSystem);
+        emitSystem!.Invoke(vm, ["Strażnik miasta wchodzi z północy.", 96]);
+
+        vm.ToggleSessionRecordingCommand.Execute(null);
+
+        Assert.Equal("Strażnik miasta wchodzi z północy.\n", File.ReadAllText(file));
     }
 
     [Fact]

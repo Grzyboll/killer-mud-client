@@ -91,6 +91,16 @@
               <MenuItem Header="Usuń znacznik"
                         Command="{Binding RemoveMarkerFromSelectedRoomCommand}"
                         IsVisible="{Binding SelectedRoomHasMarker}" />
+              <!-- Move a misplaced marker (symbol + note both) to the correct room without
+                   retyping the note: "Wytnij" removes it from here and holds it, "Wklej" drops it
+                   onto whichever room is selected next. Unlike Usuń, Wytnij doesn't discard the
+                   marker — see MapViewModel._cutMarker's own doc comment. -->
+              <MenuItem Header="Wytnij znacznik"
+                        Command="{Binding CutMarkerFromSelectedRoomCommand}"
+                        IsVisible="{Binding SelectedRoomHasMarker}" />
+              <MenuItem Header="Wklej znacznik"
+                        Command="{Binding PasteMarkerOnSelectedRoomCommand}"
+                        IsVisible="{Binding HasCutMarker}" />
               <!-- Finds the closest local "R" marker to the player's current room and focuses it
                    the same way "Szukaj pokój" does — double-click on the now-visible room still
                    walks there via the map's existing double-click handling. -->

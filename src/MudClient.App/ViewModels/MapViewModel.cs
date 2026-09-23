@@ -95,6 +95,12 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private IReadOnlyList<RoomMapMarker> _roomMarkers = [];
     private readonly MapMarkerStore? _markerStore;
     private readonly Dictionary<string, MapMarker> _markersByVnum = new(StringComparer.Ordinal);
+    /// <summary>Holds a marker cut via <see cref="CutMarkerOnSelectedRoomCommand"/> until it's
+    /// dropped onto another room with <see cref="PasteMarkerOnSelectedRoomCommand"/> — lets a
+    /// misplaced marker (symbol and note both) move to the correct room without retyping the note.
+    /// Stays put after a paste (not consumed) so the same fix can be pasted onto more than one room
+    /// if needed; only replaced by cutting something else.</summary>
+    private MapMarker? _cutMarker;
     private readonly SharedMapMarkerStore _sharedMarkerStore = new();
     private readonly IReadOnlyList<MapMarker> _sharedMarkerCatalog;
     private readonly IReadOnlyList<TeacherEntry> _teacherCatalog;
@@ -123,6 +129,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private readonly RelayCommand _lordGotoSelectedRoomCommand;
     private readonly RelayCommand<string> _setMarkerOnSelectedRoomCommand;
     private readonly RelayCommand _removeMarkerFromSelectedRoomCommand;
+    private readonly RelayCommand _cutMarkerFromSelectedRoomCommand;
+    private readonly RelayCommand _pasteMarkerOnSelectedRoomCommand;
     private readonly RelayCommand _reportMarkersCommand;
     private readonly RelayCommand _findNearestRentCommand;
     private readonly RelayCommand _startMapEditorCommand;
@@ -209,6 +217,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             CanLordGotoSelectedRoom);
         _setMarkerOnSelectedRoomCommand = new RelayCommand<string>(SetMarkerOnSelectedRoom, _ => CanEditSelectedRoomMarker);
         _removeMarkerFromSelectedRoomCommand = new RelayCommand(RemoveMarkerFromSelectedRoom, () => SelectedRoomHasMarker);
+        _cutMarkerFromSelectedRoomCommand = new RelayCommand(CutMarkerOnSelectedRoom, () => SelectedRoomHasMarker);
+        _pasteMarkerOnSelectedRoomCommand = new RelayCommand(PasteMarkerOnSelectedRoom, () => CanEditSelectedRoomMarker && HasCutMarker);
         _reportMarkersCommand = new RelayCommand(ReportMarkers, () => _markersByVnum.Count > 0);
         _findNearestRentCommand = new RelayCommand(
             FindNearestRent,
@@ -264,6 +274,10 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     public IRelayCommand<string> SetMarkerOnSelectedRoomCommand => _setMarkerOnSelectedRoomCommand;
 
     public IRelayCommand RemoveMarkerFromSelectedRoomCommand => _removeMarkerFromSelectedRoomCommand;
+
+    public IRelayCommand CutMarkerFromSelectedRoomCommand => _cutMarkerFromSelectedRoomCommand;
+
+    public IRelayCommand PasteMarkerOnSelectedRoomCommand => _pasteMarkerOnSelectedRoomCommand;
 
     public IRelayCommand ReportMarkersCommand => _reportMarkersCommand;
 
@@ -452,6 +466,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
                 _lordGotoSelectedRoomCommand.NotifyCanExecuteChanged();
                 _setMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
                 _removeMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+                _cutMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+                _pasteMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -1130,12 +1146,49 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         OnMarkersChanged();
     }
 
+    /// <summary>Whether <see cref="CutMarkerFromSelectedRoomCommand"/> has something waiting to be
+    /// dropped onto another room via <see cref="PasteMarkerOnSelectedRoomCommand"/>.</summary>
+    public bool HasCutMarker => _cutMarker is not null;
+
+    /// <summary>Removes the selected room's marker (symbol and note both) and holds onto it so
+    /// <see cref="PasteMarkerOnSelectedRoomCommand"/> can drop it onto the correct room instead —
+    /// for fixing a marker placed on the wrong room without retyping its note. See
+    /// <see cref="_cutMarker"/>'s own doc comment for why a paste doesn't consume it.</summary>
+    private void CutMarkerOnSelectedRoom()
+    {
+        if (SelectedRoom?.Vnum is not { } vnum || !_markersByVnum.TryGetValue(vnum, out var marker))
+        {
+            return;
+        }
+
+        _cutMarker = marker;
+        _markersByVnum.Remove(vnum);
+        OnPropertyChanged(nameof(HasCutMarker));
+        _pasteMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
+        OnMarkersChanged();
+    }
+
+    /// <summary>Drops the marker held by <see cref="CutMarkerFromSelectedRoomCommand"/> onto the
+    /// selected room, replacing whatever marker (and note) is already there. Does not clear
+    /// <see cref="_cutMarker"/> — see its own doc comment.</summary>
+    private void PasteMarkerOnSelectedRoom()
+    {
+        if (_cutMarker is not { } cut || SelectedRoom?.Vnum is not { } vnum || string.IsNullOrWhiteSpace(vnum))
+        {
+            return;
+        }
+
+        _markersByVnum[vnum] = cut with { Vnum = vnum };
+        OnMarkersChanged();
+    }
+
     private void OnMarkersChanged()
     {
         RefreshRoomMarkers();
         OnPropertyChanged(nameof(SelectedRoomHasMarker));
         OnPropertyChanged(nameof(SelectedRoomNote));
         _removeMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+        _cutMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
         _reportMarkersCommand.NotifyCanExecuteChanged();
         _findNearestRentCommand.NotifyCanExecuteChanged();
 

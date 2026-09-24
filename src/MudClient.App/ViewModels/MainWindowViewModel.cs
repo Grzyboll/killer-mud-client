@@ -234,6 +234,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private int _autowalkStep;
     private int _autowalkRecomputes;
     private string? _autowalkTargetName;
+    /// <summary>Whether the current autowalk was started by <see cref="TryAutoFollowLeader"/> — as
+    /// opposed to a manual walk, auto-farm, or anything else. Reset to false at the top of every
+    /// <see cref="StartAutowalk"/> call and set back to true only by <see cref="TryAutoFollowLeader"/>
+    /// itself right after starting one, so any other walk trigger naturally clears it. Lets
+    /// <see cref="ShouldAutoFollowLeader"/> redirect a follow walk already in progress toward the
+    /// leader's newest room instead of finishing a now-stale route to where the leader used to be
+    /// (see that method's own xmldoc for why this matters — without it a fast-moving leader made
+    /// the follower "overshoot" into rooms the leader had already left).</summary>
+    private bool _autowalkIsFollowingLeader;
+    /// <summary>The room vnum a follow walk in progress is currently headed to — see
+    /// <see cref="_autowalkIsFollowingLeader"/>.</summary>
+    private string? _autowalkFollowTargetVnum;
     private string _autowalkStatusText = "Bezczynny.";
     private AutowalkLocation? _temporaryTarget;
 
@@ -4519,6 +4531,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _autowalkMovementRecoveryAttempts = 0;
         _autowalkStuckRecoveryAttempts = 0;
         _autowalkTargetName = entry.Name;
+        _autowalkIsFollowingLeader = false;
+        _autowalkFollowTargetVnum = null;
         _pendingResumeTarget = null;
         OnPropertyChanged(nameof(IsAutowalking));
         AutowalkStatusText = $"Idę do „{entry.Name}” — {path.Steps.Count} kroków.";
@@ -11667,11 +11681,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// coordination with the leader's own client is needed — this character already receives the
     /// leader's current room via its own GMCP group feed, so there's nothing to relay and no race
     /// with the leader's next move (unlike ordering the leader's client to notify this one).
+    /// Also redirects a follow walk already in progress if the leader has since moved to yet
+    /// another room — see <see cref="ShouldAutoFollowLeader"/>'s own xmldoc for why.
     /// </summary>
     private void TryAutoFollowLeader(CharacterGroupUpdate update)
     {
         if (!ShouldAutoFollowLeader(
-                AutoFollowLeaderEnabled, IsConnected, IsAutowalking, _latestCharacterPosition,
+                AutoFollowLeaderEnabled, IsConnected, IsAutowalking, _autowalkIsFollowingLeader,
+                _autowalkFollowTargetVnum, _latestCharacterPosition,
                 update, _latestCharacterName, Map.CurrentVnum, out var leader) ||
             leader is null)
         {
@@ -11681,18 +11698,30 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (BuildGroupMemberAutowalkTarget(leader) is { } target)
         {
             StartAutowalk(target);
+            _autowalkIsFollowingLeader = true;
+            _autowalkFollowTargetVnum = target.Vnum;
         }
     }
 
-    /// <summary>Pure decision behind <see cref="TryAutoFollowLeader"/>: true only for a non-leader
-    /// group member, connected and not already autowalking or fighting, whose own room (
-    /// <paramref name="currentVnum"/>) differs from the GMCP-reported leader's — the same
-    /// condition "/walk leader" already resolves via <see cref="BuildGroupMemberAutowalkTarget"/>,
-    /// just checked automatically instead of on a manual command.</summary>
+    /// <summary>Pure decision behind <see cref="TryAutoFollowLeader"/>: true for a non-leader group
+    /// member, connected and not fighting, whose own room differs from the GMCP-reported leader's
+    /// — the same condition "/walk leader" already resolves via
+    /// <see cref="BuildGroupMemberAutowalkTarget"/>, just checked automatically instead of on a
+    /// manual command. While not already autowalking, that's simply <paramref name="currentVnum"/>
+    /// differing from the leader's room. While a follow walk from a previous call is already in
+    /// progress (<paramref name="isFollowWalk"/>), also allows redirecting it — returns true again
+    /// — if the leader has since moved on to a room other than
+    /// <paramref name="followWalkTargetVnum"/> (the room that walk is currently headed to): without
+    /// this, a fast-moving leader leaves the follower committed to finishing a walk toward a
+    /// now-stale room, arriving somewhere the leader already left instead of where they actually
+    /// are — the "overshoots/runs off too far" symptom this exists to fix. Any OTHER walk in
+    /// progress (manual navigation, auto-farm, ...) is left alone, exactly as before.</summary>
     internal static bool ShouldAutoFollowLeader(
         bool enabled,
         bool isConnected,
         bool isAutowalking,
+        bool isFollowWalk,
+        string? followWalkTargetVnum,
         string? position,
         CharacterGroupUpdate? update,
         string? selfName,
@@ -11701,7 +11730,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         leader = null;
 
-        if (!enabled || !isConnected || isAutowalking || update is null)
+        if (!enabled || !isConnected || update is null || (isAutowalking && !isFollowWalk))
         {
             return false;
         }
@@ -11717,9 +11746,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         var candidate = update.Members.FirstOrDefault(member => member.IsLeader);
-        if (candidate is null || string.IsNullOrWhiteSpace(candidate.Room) ||
-            string.IsNullOrWhiteSpace(currentVnum) ||
-            string.Equals(currentVnum, candidate.Room, StringComparison.Ordinal))
+        if (candidate is null || string.IsNullOrWhiteSpace(candidate.Room))
+        {
+            return false;
+        }
+
+        var alreadyThere = isAutowalking
+            ? string.Equals(candidate.Room, followWalkTargetVnum, StringComparison.Ordinal)
+            : string.IsNullOrWhiteSpace(currentVnum)
+                || string.Equals(currentVnum, candidate.Room, StringComparison.Ordinal);
+        if (alreadyThere)
         {
             return false;
         }

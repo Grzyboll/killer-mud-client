@@ -135,6 +135,15 @@ public sealed class ProfileAutomationSettings
     /// <see cref="AutoFarmHealOrderEnabled"/>. One name per line, sent to each member in turn.</summary>
     public string AutoFarmHealOrderSpellNamesText { get; set; } = string.Empty;
 
+    /// <summary>Also orders <c>mem "&lt;name&gt;"</c> right before each cast in
+    /// <see cref="AutoFarmHealOrderSpellNamesText"/> — there's no GMCP visibility into whether a
+    /// group member still has a specific spell memorized (only a coarse remaining-mem-points
+    /// count), so this just keeps re-ordering the mem alongside the cast every time the heal
+    /// order fires; harmless against a spell that's already memorized, and means a companion who
+    /// ran out gets it re-memorized in time for the next HP dip instead of the order silently
+    /// failing forever.</summary>
+    public bool AutoFarmHealOrderMemEnabled { get; set; }
+
     /// <summary>Casts the strongest already-memorized entry from
     /// <c>AutoFarmHealSpellNamesText</c> on self the moment this character's own HP drops below
     /// the farm's HP threshold — the same reaction <see cref="Core.Automation.HealthRecoveryPolicy.ShouldCastCombatHeal"/>

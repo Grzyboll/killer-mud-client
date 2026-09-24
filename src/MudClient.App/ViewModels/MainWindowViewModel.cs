@@ -2518,6 +2518,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmHealOrderMemEnabled"/>.</summary>
+    public bool AutoFarmHealOrderMemEnabled
+    {
+        get => _profileSettings.AutoFarmHealOrderMemEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmHealOrderMemEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmHealOrderMemEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     /// <summary>Whether <see cref="TryAutoFarmCombatHeal"/> reacts to this character's own HP even
     /// while auto-farm isn't running — see <see cref="ProfileAutomationSettings.AutoSelfHealEnabled"/>'s
     /// own xmldoc for the follower-character use case this is for.</summary>
@@ -2987,6 +3004,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoAssistNpcEnabled));
         OnPropertyChanged(nameof(AutoFarmHealOrderEnabled));
         OnPropertyChanged(nameof(AutoFarmHealOrderSpellNamesText));
+        OnPropertyChanged(nameof(AutoFarmHealOrderMemEnabled));
         OnPropertyChanged(nameof(AutoSelfHealEnabled));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
@@ -7062,7 +7080,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         var healSpellNames = CommandStacker.Split(AutoFarmHealOrderSpellNamesText, CommandStackingSeparator);
         var orders = BuildAutoFarmHealOrderCommands(
-            _latestGroupUpdate, _latestCharacterName, healSpellNames, AutoFarmHealOrderEnabled);
+            _latestGroupUpdate, _latestCharacterName, healSpellNames,
+            AutoFarmHealOrderEnabled, AutoFarmHealOrderMemEnabled);
         if (orders.Count == 0)
         {
             return;
@@ -7077,10 +7096,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// for every other group member, in turn — the same "cast on self" shape
     /// <see cref="AutoFarmHealSpellNamesText"/> itself casts locally, so the companion actually
     /// heals themselves instead of the MUD rejecting a bare spell name as an unknown command.
-    /// Empty unless <paramref name="enabled"/>, there's at least one configured spell, and we're
-    /// the group's own leader (mirrors <see cref="BuildGroupPositionOrderCommands"/>).</summary>
+    /// When <paramref name="includeMem"/> is set (<see cref="AutoFarmHealOrderMemEnabled"/>), an
+    /// "order &lt;name&gt; mem &quot;&lt;spell&gt;&quot;" precedes each cast — see that setting's
+    /// own xmldoc for why this is unconditional rather than only when actually needed. Empty
+    /// unless <paramref name="enabled"/>, there's at least one configured spell, and we're the
+    /// group's own leader (mirrors <see cref="BuildGroupPositionOrderCommands"/>).</summary>
     internal static IReadOnlyList<string> BuildAutoFarmHealOrderCommands(
-        CharacterGroupUpdate? group, string? selfName, IReadOnlyList<string> healSpellNames, bool enabled)
+        CharacterGroupUpdate? group, string? selfName, IReadOnlyList<string> healSpellNames,
+        bool enabled, bool includeMem = false)
     {
         if (!enabled || healSpellNames.Count == 0 || group is null
             || !string.Equals(group.Leader, selfName, StringComparison.OrdinalIgnoreCase))
@@ -7089,7 +7112,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         return BuildOtherGroupMemberNames(group, selfName)
-            .SelectMany(name => healSpellNames.Select(spell => $"order {name} cast \"{spell}\" self"))
+            .SelectMany(name => healSpellNames.SelectMany(spell => includeMem
+                ? new[] { $"order {name} mem \"{spell}\"", $"order {name} cast \"{spell}\" self" }
+                : new[] { $"order {name} cast \"{spell}\" self" }))
             .ToArray();
     }
 

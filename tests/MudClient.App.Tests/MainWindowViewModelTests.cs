@@ -529,7 +529,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: false, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: false, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out var leader);
 
         Assert.False(result);
@@ -542,30 +543,66 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: false, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: false, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
     }
 
     [Fact]
-    public void ShouldAutoFollowLeader_AlreadyAutowalking_ReturnsFalse()
+    public void ShouldAutoFollowLeader_AlreadyAutowalkingUnrelatedWalk_ReturnsFalse()
     {
-        // Don't yank control from an unrelated walk already in progress (e.g. auto-farm).
+        // Don't yank control from an unrelated walk already in progress (e.g. auto-farm) — only a
+        // follow walk itself (isFollowWalk: true) is ever redirected.
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: true, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
+    }
+
+    [Fact]
+    public void ShouldAutoFollowLeader_FollowWalkStillHeadingToLeadersRoom_ReturnsFalse()
+    {
+        // Leader hasn't moved since this follow walk started — nothing to redirect to.
+        var group = TwoMemberGroup("Hero", "200");
+
+        var result = MainWindowViewModel.ShouldAutoFollowLeader(
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: true,
+            followWalkTargetVnum: "200", position: "standing",
+            group, selfName: "Companion", currentVnum: "150", out _);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void ShouldAutoFollowLeader_FollowWalkLeaderMovedOn_ReturnsTrueWithNewLeaderRoom()
+    {
+        // Regression target: the leader moved again while this follow walk was still headed to
+        // their OLD room — must redirect toward the new one instead of finishing the stale route
+        // (the "overshoots/runs off too far" symptom this exists to fix).
+        var group = TwoMemberGroup("Hero", "300");
+
+        var result = MainWindowViewModel.ShouldAutoFollowLeader(
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: true,
+            followWalkTargetVnum: "200", position: "standing",
+            group, selfName: "Companion", currentVnum: "150", out var leader);
+
+        Assert.True(result);
+        Assert.NotNull(leader);
+        Assert.Equal("300", leader.Room);
     }
 
     [Fact]
     public void ShouldAutoFollowLeader_NullGroup_ReturnsFalse()
     {
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             update: null, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -577,7 +614,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Companion", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -589,7 +627,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "fighting",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "fighting",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -601,7 +640,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", leaderRoom: null);
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -613,7 +653,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: null, out _);
 
         Assert.False(result);
@@ -625,7 +666,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "200", out _);
 
         Assert.False(result);
@@ -637,7 +679,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out var leader);
 
         Assert.True(result);

@@ -815,6 +815,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public string SessionRecordingButtonText => IsRecordingSession ? "Zatrzymaj nagrywanie" : "Nagrywaj sesję";
 
+    /// <summary>Compact glyph for the quick-access toggle next to "Wyślij" — the full
+    /// <see cref="SessionRecordingButtonText"/> only fits in the Ustawienia panel's own button.</summary>
+    public string SessionRecordingIcon => IsRecordingSession ? "⏹" : "⏺";
+
     public string SessionRecordingStatusText => IsRecordingSession
         ? $"Nagrywanie do pliku: {_sessionRecorder.CurrentFilePath}"
         : "Nagrywanie wyłączone.";
@@ -842,6 +846,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         OnPropertyChanged(nameof(IsRecordingSession));
         OnPropertyChanged(nameof(SessionRecordingButtonText));
+        OnPropertyChanged(nameof(SessionRecordingIcon));
         OnPropertyChanged(nameof(SessionRecordingStatusText));
     }
 
@@ -4761,6 +4766,22 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             // Another recovery path already owns this step (e.g. a recognized
             // "brama...zamknięta" line already armed the GMCP gate-reopen wait,
             // or the player consciously rested mid-route).
+            return;
+        }
+
+        if (AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition))
+        {
+            // Direct fallback for _autowalkPausedForCombat above: that flag is only set once
+            // OnAutowalkCombatStarted's own Dispatcher.UIThread.Post lands, which — however
+            // unlikely — could still be queued behind this stuck-check if a mob's attack landed
+            // right as the timeout elapsed. Without this, a fight that starts (e.g. an aggressive
+            // mob attacking, not this character's own move) right around the stuck timeout gets
+            // misread as a blocked exit: the recovery path below sends "open"/"knock" commands the
+            // MUD just rejects mid-fight, and after enough failed attempts the room gets excluded
+            // as unreachable for this farm run even though the exit was never actually the
+            // problem. Arm the same pause flag OnAutowalkCombatStarted would so
+            // OnAutowalkCombatEnded still resumes this step normally once the fight is over.
+            _autowalkPausedForCombat = true;
             return;
         }
 
@@ -10976,7 +10997,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// Resumes a walk that a fight put on hold. The walk stalled because no room
-    /// change arrived during combat, so the pending step is re-sent.
+    /// change arrived during combat, so the pending step is re-sent — or, if a gate-opening
+    /// sequence was cut short by the same fight (see <see cref="SendGateCommandsAsync"/>), that
+    /// sequence is retried instead: <see cref="SendAutowalkStep"/> would otherwise just no-op
+    /// forever, since it defers to <see cref="_autowalkWaitingForGate"/> staying armed with
+    /// nothing left to drive it forward.
     /// </summary>
     private void OnAutowalkCombatEnded()
     {
@@ -10993,6 +11018,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (!AutowalkRecoveryPolicy.IsStandingPosition(_latestCharacterPosition))
             {
                 _ = SendTriggeredCommandAsync("stand");
+            }
+
+            if (_autowalkWaitingForGate)
+            {
+                _autowalkGateCommandsSent = false;
+                _autowalkGateIsOpen = false;
+                _ = SendGateCommandsAsync(_autowalkCts.Token);
+                return;
             }
 
             SendAutowalkStep();
@@ -11242,6 +11275,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             foreach (var command in AutowalkRecoveryPolicy.GetGateOpeningCommands())
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_autowalkPausedForCombat || AutowalkRecoveryPolicy.IsCombatPosition(_latestCharacterPosition))
+                {
+                    // Attacked mid-sequence — further open/knock attempts would just get rejected
+                    // while fighting, and could get misread as "this door won't open" instead of
+                    // what actually happened. Leave _autowalkWaitingForGate armed and stop here;
+                    // OnAutowalkCombatEnded retries the whole sequence once the fight is over,
+                    // instead of racing it.
+                    _autowalkPausedForCombat = true;
+                    return;
+                }
+
                 await SendTriggeredCommandAsync(command, cancellationToken);
             }
 

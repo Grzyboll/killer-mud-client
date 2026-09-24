@@ -5,6 +5,13 @@
              xmlns:vm="using:MudClient.App.ViewModels"
              x:Class="MudClient.App.Views.Panels.TerminalPanelView"
              x:DataType="vm:MainWindowViewModel">
+  <UserControl.Styles>
+    <!-- Quick-access session recording toggle next to "Wyślij" — red while recording so it reads
+         as an active indicator, not just a button, matching the usual "recording dot" convention. -->
+    <Style Selector="Button.recording">
+      <Setter Property="Foreground" Value="{StaticResource MudBrushCrimsonBright}" />
+    </Style>
+  </UserControl.Styles>
   <Panel>
   <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="Auto,*,Auto">
 
@@ -198,7 +205,7 @@
          without reserving any space from it (see TerminalOverlayHost), so there is no need to
          make room for them here. -->
     <Border Grid.Column="1" Grid.Row="2" Classes="mud-bar-bottom" Padding="8,6">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
         <TextBox Grid.Column="0"
                  x:Name="CommandBox"
                  Classes="terminal-input"
@@ -265,6 +272,13 @@
                 ToolTip.Tip="Następne dopasowanie (nowsze)"
                 Click="SearchNextButton_OnClick" />
         <Button Grid.Column="4"
+                Classes="mud-small"
+                Classes.recording="{Binding IsRecordingSession}"
+                Content="{Binding SessionRecordingIcon}"
+                Padding="10,7"
+                ToolTip.Tip="{Binding SessionRecordingButtonText}"
+                Command="{Binding ToggleSessionRecordingCommand}" />
+        <Button Grid.Column="5"
                 Content="➤"
                 Padding="20,7"
                 ToolTip.Tip="Wyślij"

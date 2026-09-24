@@ -690,6 +690,144 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     // ====================================================================
+    // TryBuildLeaderTrailPath — retrace the leader's actual steps instead of the pathfinder's own
+    // shortest route (Automaty → Podróż → Autofollow)
+    // ====================================================================
+
+    private static MapRoom CreateRoomWithExits(int id, string vnum, params (string Name, int Target)[] exits) => new()
+    {
+        Id = id,
+        AreaId = 1,
+        Coordinates = new MapCoordinates(id, 0, 0),
+        UserData = new Dictionary<string, JsonElement>
+        {
+            ["vnum"] = JsonSerializer.SerializeToElement(vnum),
+        },
+        Exits = exits.Select(e => new MapExit { ExitId = e.Target, Name = e.Name }).ToList(),
+    };
+
+    /// <summary>Diamond layout: 1↔2↔3↔4 the long way around (three steps), plus a direct 1↔4
+    /// shortcut (one step) the pathfinder's own shortest-path search would always prefer — so a
+    /// path that goes 1→2→3→4 instead of straight 1→4 can only have come from following the
+    /// trail, never from FindPathByVnum.</summary>
+    private static MapIndex CreateDiamondMapIndex() => new(new MapDocument
+    {
+        Areas =
+        [
+            new MapArea
+            {
+                Id = 1,
+                Rooms =
+                [
+                    CreateRoomWithExits(1, "1", ("north", 2), ("east", 4)),
+                    CreateRoomWithExits(2, "2", ("south", 1), ("north", 3)),
+                    CreateRoomWithExits(3, "3", ("south", 2), ("north", 4)),
+                    CreateRoomWithExits(4, "4", ("south", 3), ("west", 1)),
+                ],
+            },
+        ],
+    });
+
+    private List<string> GetLeaderRoomTrail() => (List<string>)typeof(MainWindowViewModel)
+        .GetField("_leaderRoomTrail", BindingFlags.NonPublic | BindingFlags.Instance)!
+        .GetValue(_vm)!;
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_NoMapIndex_ReturnsNull()
+    {
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_FromNotInTrail_ReturnsNull()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["2", "3", "4"]);
+
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ToBeforeFromInTrail_ReturnsNull()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["4", "3", "2", "1"]);
+
+        // "4" is earlier in the trail than "1" — the leader was there before, not on the way there.
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_SameRoom_ReturnsEmptyPath()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "2"]);
+
+        var path = _vm.TryBuildLeaderTrailPath("1", "1");
+
+        Assert.NotNull(path);
+        Assert.Empty(path!.Steps);
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ValidTrail_FollowsTrailOrderNotTheShortcut()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "2", "3", "4"]);
+
+        var path = _vm.TryBuildLeaderTrailPath("1", "4");
+
+        Assert.NotNull(path);
+        Assert.Equal(["north", "north", "north"], path!.Steps.Select(step => step.Command));
+        Assert.Equal(["2", "3", "4"], path.Steps.Select(step => step.ToRoom.Vnum));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ConsecutiveTrailRoomsNotAdjacent_ReturnsNull()
+    {
+        // Simulates a teleport/recall between two trail entries — "1" and "3" both appear in the
+        // trail but aren't directly connected on the map (only "1"-"2" and "2"-"3"/"north" are).
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "3", "4"]);
+
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    private static CharacterGroupUpdate GroupWithLeaderInRoom(string leaderName, string room) => new(
+        leaderName,
+        [new(leaderName, null, string.Empty, null, string.Empty, null, null, false, room, IsLeader: true)]);
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_LeaderMovesThroughRooms_AppendsEachNewRoomInOrder()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "2"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "3"));
+
+        Assert.Equal(["1", "2", "3"], GetLeaderRoomTrail());
+    }
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_SameRoomReportedAgain_DoesNotDuplicate()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+
+        Assert.Equal(["1"], GetLeaderRoomTrail());
+    }
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_LeaderChanges_ClearsPreviousTrail()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "2"));
+
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Companion", "5"));
+
+        Assert.Equal(["5"], GetLeaderRoomTrail());
+    }
+
+    // ====================================================================
     // ShouldMirrorLeaderPosition — "Kopiuj postawę lidera" (Automaty → Drużyna)
     // ====================================================================
 
@@ -3709,6 +3847,17 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
             BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(method);
         method!.Invoke(_vm, [people]);
+    }
+
+    /// <summary>Invokes the private UpdateLeaderRoomTrail method via reflection — directly, not
+    /// through OnGroupChanged's own Dispatcher.UIThread.Post, since this test class doesn't pump
+    /// the Avalonia dispatcher and the method itself has no dispatcher dependency of its own.</summary>
+    private void InvokeUpdateLeaderRoomTrail(CharacterGroupUpdate update)
+    {
+        var method = typeof(MainWindowViewModel).GetMethod("UpdateLeaderRoomTrail",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+        method!.Invoke(_vm, [update]);
     }
 
     /// <summary>Invokes the private OnGroupChanged method via reflection.</summary>

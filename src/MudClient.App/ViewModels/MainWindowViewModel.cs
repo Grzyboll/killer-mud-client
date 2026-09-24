@@ -246,6 +246,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>The room vnum a follow walk in progress is currently headed to — see
     /// <see cref="_autowalkIsFollowingLeader"/>.</summary>
     private string? _autowalkFollowTargetVnum;
+    /// <summary>Room vnums the current group's leader has actually walked through, oldest first,
+    /// deduplicated against immediate repeats — see <see cref="TryBuildLeaderTrailPath"/>. Lets a
+    /// follower retrace the leader's own steps instead of the pathfinder's independent shortest
+    /// route, which could cut through unexplored or dangerous rooms the leader deliberately went
+    /// around. Cleared whenever the group's leader itself changes (a new leader's trail starts
+    /// fresh) and capped at <see cref="MaxLeaderRoomTrailLength"/>, dropping the oldest entries, so
+    /// a long session doesn't grow this unboundedly. Only ever touched on the UI thread (see
+    /// <see cref="UpdateLeaderRoomTrail"/>'s own call site), matching every other autowalk field.</summary>
+    private readonly List<string> _leaderRoomTrail = [];
+    private string? _leaderRoomTrailLeaderName;
+    private const int MaxLeaderRoomTrailLength = 300;
     private string _autowalkStatusText = "Bezczynny.";
     private AutowalkLocation? _temporaryTarget;
 
@@ -4493,7 +4504,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         SaveActiveProfile();
     }
 
-    private void StartAutowalk(AutowalkLocation entry, IReadOnlySet<int>? excludedRoomIds = null)
+    /// <param name="precomputedPath">Use this exact path instead of computing one via the
+    /// pathfinder — currently only <see cref="TryAutoFollowLeader"/> passes one, to retrace the
+    /// group leader's own steps (see <see cref="TryBuildLeaderTrailPath"/>) rather than an
+    /// independently-computed shortest route.</param>
+    private void StartAutowalk(
+        AutowalkLocation entry, IReadOnlySet<int>? excludedRoomIds = null, MapPath? precomputedPath = null)
     {
         var pathfinder = GetPathfinder();
         if (pathfinder is null)
@@ -4509,7 +4525,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var path = pathfinder.FindPathByVnum(currentVnum, entry.Vnum, excludedRoomIds);
+        var path = precomputedPath ?? pathfinder.FindPathByVnum(currentVnum, entry.Vnum, excludedRoomIds);
         if (path is null)
         {
             AddToast(
@@ -11715,8 +11731,41 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(GroupEmptyMessage));
             Map.UpdateGroupMembers(update.Members, _latestCharacterName);
             RefreshVisibleGroup(update);
+            UpdateLeaderRoomTrail(update);
             TryAutoFollowLeader(update);
         });
+    }
+
+    /// <summary>Appends the current group leader's room to <see cref="_leaderRoomTrail"/> if it's
+    /// new — see that field's own doc comment. Called on every GMCP group update, not just while
+    /// Autofollow is enabled, so the trail is already populated the moment it's turned on instead
+    /// of starting empty (and therefore falling back to the plain shortest path) until the leader
+    /// happens to move again afterward.</summary>
+    private void UpdateLeaderRoomTrail(CharacterGroupUpdate update)
+    {
+        var leader = update.Members.FirstOrDefault(member => member.IsLeader);
+        if (leader is null || string.IsNullOrWhiteSpace(leader.Room))
+        {
+            return;
+        }
+
+        if (!string.Equals(leader.Name, _leaderRoomTrailLeaderName, StringComparison.OrdinalIgnoreCase))
+        {
+            _leaderRoomTrail.Clear();
+            _leaderRoomTrailLeaderName = leader.Name;
+        }
+
+        if (_leaderRoomTrail.Count > 0 &&
+            string.Equals(_leaderRoomTrail[^1], leader.Room, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _leaderRoomTrail.Add(leader.Room);
+        if (_leaderRoomTrail.Count > MaxLeaderRoomTrailLength)
+        {
+            _leaderRoomTrail.RemoveAt(0);
+        }
     }
 
     /// <summary>
@@ -11741,10 +11790,86 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         if (BuildGroupMemberAutowalkTarget(leader) is { } target)
         {
-            StartAutowalk(target);
+            // Prefer retracing the leader's own steps (see TryBuildLeaderTrailPath) over the
+            // pathfinder's independent shortest route, which could cut through unexplored or
+            // dangerous rooms the leader deliberately avoided — falls back to the plain shortest
+            // path when the trail doesn't actually connect here to there (e.g. the follower fell
+            // too far behind, joined the group mid-route, or the leader teleported).
+            var trailPath = TryBuildLeaderTrailPath(Map.CurrentVnum, leader.Room);
+            StartAutowalk(target, precomputedPath: trailPath);
             _autowalkIsFollowingLeader = true;
             _autowalkFollowTargetVnum = target.Vnum;
         }
+    }
+
+    /// <summary>Builds a walk from <paramref name="fromVnum"/> to <paramref name="toVnum"/> using
+    /// only rooms the leader is known to have actually walked through (see
+    /// <see cref="_leaderRoomTrail"/>), in that exact order — instead of the pathfinder's own
+    /// shortest route. Returns null (letting the caller fall back to the normal shortest path) when
+    /// either vnum isn't in the trail at all, when <paramref name="fromVnum"/>'s occurrence isn't
+    /// followed by <paramref name="toVnum"/>'s, or when two consecutive trail rooms turn out not to
+    /// be directly connected on the map (e.g. a teleport/recall jump, not an ordinary step) — a
+    /// trail that doesn't actually check out is exactly the situation the shortest-path fallback
+    /// exists for, not something to fail the walk over.</summary>
+    internal MapPath? TryBuildLeaderTrailPath(string? fromVnum, string? toVnum)
+    {
+        if (string.IsNullOrWhiteSpace(fromVnum) || string.IsNullOrWhiteSpace(toVnum) ||
+            Map.MapIndex is not { } index)
+        {
+            return null;
+        }
+
+        var fromIndex = _leaderRoomTrail.LastIndexOf(fromVnum);
+        if (fromIndex < 0)
+        {
+            return null;
+        }
+
+        var toIndex = _leaderRoomTrail.LastIndexOf(toVnum);
+        if (toIndex < fromIndex)
+        {
+            return null;
+        }
+
+        if (fromIndex == toIndex)
+        {
+            var samePlaceRoom = index.FindFirstRoomByVnum(fromVnum);
+            return samePlaceRoom is null
+                ? null
+                : new MapPath { From = samePlaceRoom, To = samePlaceRoom, Steps = [], TotalCost = 0 };
+        }
+
+        var fromRoom = index.FindFirstRoomByVnum(fromVnum);
+        var toRoom = index.FindFirstRoomByVnum(toVnum);
+        if (fromRoom is null || toRoom is null)
+        {
+            return null;
+        }
+
+        var steps = new List<MapPathStep>();
+        var currentRoom = fromRoom;
+        for (var i = fromIndex; i < toIndex; i++)
+        {
+            var nextRoom = index.FindFirstRoomByVnum(_leaderRoomTrail[i + 1]);
+            if (nextRoom is null)
+            {
+                return null;
+            }
+
+            var exit = currentRoom.Exits.FirstOrDefault(
+                candidate => candidate.ExitId == nextRoom.Id && !string.IsNullOrWhiteSpace(candidate.Name));
+            if (exit is null)
+            {
+                // Not actually adjacent on the map (a teleport/recall between trail entries,
+                // most likely) — the trail can't be trusted here, fall back to the pathfinder.
+                return null;
+            }
+
+            steps.Add(new MapPathStep(exit.Name!, nextRoom, exit.HasDoor ? exit.Door : null));
+            currentRoom = nextRoom;
+        }
+
+        return new MapPath { From = fromRoom, To = toRoom, Steps = steps, TotalCost = steps.Count };
     }
 
     /// <summary>Pure decision behind <see cref="TryAutoFollowLeader"/>: true for a non-leader group

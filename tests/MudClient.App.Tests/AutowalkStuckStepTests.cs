@@ -256,6 +256,111 @@ public sealed class AutowalkStuckStepTests
     }
 
     [AvaloniaFact]
+    public async Task HandleAutowalkStepStuck_FightingButPauseFlagNotYetArmed_ArmsItAndDoesNothing()
+    {
+        // Regression target for "attacked mid-farm gets the room excluded as unreachable":
+        // _autowalkPausedForCombat is normally armed by OnAutowalkCombatStarted's own
+        // Dispatcher.UIThread.Post, which could in principle still be queued behind this
+        // stuck-check if an aggressive mob's attack landed right as the timeout elapsed. Without
+        // this direct fallback, the stuck backstop would misread a fight (not a blocked exit) as
+        // one, try "open"/"knock" recovery commands the MUD just rejects mid-fight, and eventually
+        // exclude a perfectly walkable room.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_autowalkStuckRecoveryAttempts", GetMaxStuckRecoveryAttempts());
+            SetPrivateField(viewModel, "_latestCharacterPosition", "fighting");
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkPausedForCombat"));
+
+            InvokePrivate(viewModel, "HandleAutowalkStepStuck", 0, CancellationToken.None);
+
+            Assert.True(viewModel.IsAutowalking);
+            Assert.DoesNotContain(2, viewModel.Map.AutoFarmExcludedRoomIds);
+            Assert.Equal(
+                GetMaxStuckRecoveryAttempts(), GetPrivateField<int>(viewModel, "_autowalkStuckRecoveryAttempts"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autowalkPausedForCombat"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task OnAutowalkCombatEnded_GateSequenceWasInterrupted_RetriesItInsteadOfNoOpStep()
+    {
+        // Regression target: a fight that starts mid gate-opening-sequence (SendGateCommandsAsync)
+        // now stops sending further open/knock commands and leaves _autowalkWaitingForGate armed
+        // — so once the fight ends, resuming via a plain SendAutowalkStep would just no-op forever
+        // (that method defers entirely to _autowalkWaitingForGate). OnAutowalkCombatEnded must
+        // instead restart the gate sequence from scratch.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autowalkWaitingForGate", true);
+            SetPrivateField(viewModel, "_autowalkGateCommandsSent", true);
+            SetPrivateField(viewModel, "_autowalkGateIsOpen", false);
+            SetPrivateField(viewModel, "_autowalkPausedForCombat", true);
+            SetPrivateField(viewModel, "_latestCharacterPosition", "standing");
+
+            InvokePrivate(viewModel, "OnAutowalkCombatEnded");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkPausedForCombat"));
+            // Still (genuinely) waiting for GMCP to confirm the door open — proves the gate-retry
+            // branch ran instead of falling through to SendAutowalkStep's plain movement path,
+            // which would have cleared _autowalkWaitingForGate and sent a move command instead.
+            // Nothing in this test simulates OnRoomExitsChanged confirming the door, so
+            // _autowalkGateIsOpen correctly never flips true on its own.
+            Assert.True(GetPrivateField<bool>(viewModel, "_autowalkWaitingForGate"));
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkGateIsOpen"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SendGateCommandsAsync_FightingBeforeFirstCommand_StopsWithoutMarkingCommandsSent()
+    {
+        // Regression target: previously this loop had no combat check at all and would send every
+        // open/knock command regardless — exactly the "client still tries to open, knock, etc."
+        // after being attacked that this whole fix is for.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autowalkWaitingForGate", true);
+            SetPrivateField(viewModel, "_latestCharacterPosition", "fighting");
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autowalkCts");
+
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("SendGateCommandsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [cts.Token])!;
+            await task;
+
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkGateCommandsSent"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autowalkPausedForCombat"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autowalkWaitingForGate"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task UpdateCharacterPosition_ConsciousRestMidRoute_PausesAutowalkInsteadOfGateRecovery()
     {
         var viewModel = CreateViewModel(out var directory);

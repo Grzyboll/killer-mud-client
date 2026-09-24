@@ -267,7 +267,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     [Fact]
-    public void BuildAutoFarmHealOrderCommands_NoCommandsConfigured_ReturnsEmpty()
+    public void BuildAutoFarmHealOrderCommands_NoSpellsConfigured_ReturnsEmpty()
     {
         var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
         {
@@ -279,8 +279,11 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     [Fact]
-    public void BuildAutoFarmHealOrderCommands_AsLeader_OrdersEveryOtherMemberWithEachCommand()
+    public void BuildAutoFarmHealOrderCommands_AsLeader_OrdersEveryOtherMemberToCastOnSelf()
     {
+        // Regression target: entries are spell names, not raw commands — the order sent must
+        // wrap each in "cast \"<name>\" self" so the companion actually casts it, instead of the
+        // MUD rejecting a bare spell name as an unknown command.
         var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
         {
             new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
@@ -289,10 +292,12 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         });
 
         var commands = MainWindowViewModel.BuildAutoFarmHealOrderCommands(
-            group, "Hero", ["cast 'cure critical'", "cast 'cure serious'"], enabled: true);
+            group, "Hero", ["cure critical", "cure serious"], enabled: true);
 
         // Only "Companion" — Wolf is an NPC and Hero is self, neither gets ordered.
-        Assert.Equal(["order Companion cast 'cure critical'", "order Companion cast 'cure serious'"], commands);
+        Assert.Equal(
+            ["order Companion cast \"cure critical\" self", "order Companion cast \"cure serious\" self"],
+            commands);
     }
 
     [Fact]

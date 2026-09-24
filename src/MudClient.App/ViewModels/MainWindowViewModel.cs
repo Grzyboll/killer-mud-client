@@ -2497,18 +2497,41 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    public string AutoFarmHealOrderCommandsText
+    /// <summary>One heal spell name per line — see <see cref="TryAutoFarmHealOrderGroup"/>, which
+    /// builds each into <c>order &lt;member&gt; cast "&lt;name&gt;" self</c> (the same "cast on
+    /// self" shape <see cref="AutoFarmHealSpellNamesText"/> itself casts locally), not a raw
+    /// command to send verbatim.</summary>
+    public string AutoFarmHealOrderSpellNamesText
     {
-        get => _profileSettings.AutoFarmHealOrderCommandsText;
+        get => _profileSettings.AutoFarmHealOrderSpellNamesText;
         set
         {
-            var commands = value ?? string.Empty;
-            if (string.Equals(_profileSettings.AutoFarmHealOrderCommandsText, commands, StringComparison.Ordinal))
+            var names = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoFarmHealOrderSpellNamesText, names, StringComparison.Ordinal))
             {
                 return;
             }
 
-            _profileSettings.AutoFarmHealOrderCommandsText = commands;
+            _profileSettings.AutoFarmHealOrderSpellNamesText = names;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>Whether <see cref="TryAutoFarmCombatHeal"/> reacts to this character's own HP even
+    /// while auto-farm isn't running — see <see cref="ProfileAutomationSettings.AutoSelfHealEnabled"/>'s
+    /// own xmldoc for the follower-character use case this is for.</summary>
+    public bool AutoSelfHealEnabled
+    {
+        get => _profileSettings.AutoSelfHealEnabled;
+        set
+        {
+            if (_profileSettings.AutoSelfHealEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoSelfHealEnabled = value;
             OnPropertyChanged();
             SaveActiveProfile();
         }
@@ -2963,7 +2986,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoGroupRefreshOnExhaustedEnabled));
         OnPropertyChanged(nameof(AutoAssistNpcEnabled));
         OnPropertyChanged(nameof(AutoFarmHealOrderEnabled));
-        OnPropertyChanged(nameof(AutoFarmHealOrderCommandsText));
+        OnPropertyChanged(nameof(AutoFarmHealOrderSpellNamesText));
+        OnPropertyChanged(nameof(AutoSelfHealEnabled));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
@@ -7036,9 +7060,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var healCommands = CommandStacker.Split(AutoFarmHealOrderCommandsText, CommandStackingSeparator);
+        var healSpellNames = CommandStacker.Split(AutoFarmHealOrderSpellNamesText, CommandStackingSeparator);
         var orders = BuildAutoFarmHealOrderCommands(
-            _latestGroupUpdate, _latestCharacterName, healCommands, AutoFarmHealOrderEnabled);
+            _latestGroupUpdate, _latestCharacterName, healSpellNames, AutoFarmHealOrderEnabled);
         if (orders.Count == 0)
         {
             return;
@@ -7048,21 +7072,24 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         QueueTriggeredCommands(orders);
     }
 
-    /// <summary>Pure decision behind <see cref="TryAutoFarmHealOrderGroup"/>: an "order &lt;name&gt;
-    /// &lt;command&gt;" for every configured heal command, for every other group member, in turn —
-    /// empty unless <paramref name="enabled"/>, there's at least one configured command, and we're
+    /// <summary>Pure decision behind <see cref="TryAutoFarmHealOrderGroup"/>: an
+    /// "order &lt;name&gt; cast &quot;&lt;spell&gt;&quot; self" for every configured heal spell,
+    /// for every other group member, in turn — the same "cast on self" shape
+    /// <see cref="AutoFarmHealSpellNamesText"/> itself casts locally, so the companion actually
+    /// heals themselves instead of the MUD rejecting a bare spell name as an unknown command.
+    /// Empty unless <paramref name="enabled"/>, there's at least one configured spell, and we're
     /// the group's own leader (mirrors <see cref="BuildGroupPositionOrderCommands"/>).</summary>
     internal static IReadOnlyList<string> BuildAutoFarmHealOrderCommands(
-        CharacterGroupUpdate? group, string? selfName, IReadOnlyList<string> healCommands, bool enabled)
+        CharacterGroupUpdate? group, string? selfName, IReadOnlyList<string> healSpellNames, bool enabled)
     {
-        if (!enabled || healCommands.Count == 0 || group is null
+        if (!enabled || healSpellNames.Count == 0 || group is null
             || !string.Equals(group.Leader, selfName, StringComparison.OrdinalIgnoreCase))
         {
             return [];
         }
 
         return BuildOtherGroupMemberNames(group, selfName)
-            .SelectMany(name => healCommands.Select(command => $"order {name} {command}"))
+            .SelectMany(name => healSpellNames.Select(spell => $"order {name} cast \"{spell}\" self"))
             .ToArray();
     }
 
@@ -11351,16 +11378,21 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         });
     }
 
-    /// <summary>Reacts to every single Char.Vitals update while auto-farm is running, not just
-    /// room arrivals (see <see cref="ContinueAutoFarm"/>) — lets a heal spell fire mid-fight the
-    /// moment HP drops below <see cref="_autoFarmHpThresholdPercent"/>, instead of only after the
-    /// farm finishes walking to its next room. Memorizing/resting stay the room-arrival flow's
-    /// job (see <see cref="HealthRecoveryPolicy.ShouldCastCombatHeal"/>'s xmldoc for why).</summary>
+    /// <summary>Reacts to every single Char.Vitals update while auto-farm is running OR
+    /// <see cref="AutoSelfHealEnabled"/> is on, not just room arrivals (see
+    /// <see cref="ContinueAutoFarm"/>) — lets a heal spell fire mid-fight the moment HP drops
+    /// below <see cref="_autoFarmHpThresholdPercent"/>, instead of only after the farm finishes
+    /// walking to its next room. <see cref="AutoSelfHealEnabled"/> is the same reaction without
+    /// requiring the farm itself to be running — for a follower character that just uses
+    /// <see cref="ProfileAutomationSettings.AutoFollowLeaderEnabled"/> and needs to survive
+    /// between fights on its own, since this never mems (see
+    /// <see cref="HealthRecoveryPolicy.ShouldCastCombatHeal"/>'s xmldoc for why — memorizing/
+    /// resting stay the room-arrival flow's job, which a non-farming follower has none of).</summary>
     private void TryAutoFarmCombatHeal()
     {
         var now = DateTimeOffset.UtcNow;
         var (shouldCast, spellName) = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            _autoFarmActive,
+            _autoFarmActive || AutoSelfHealEnabled,
             _latestHp,
             _latestMaxHp,
             _autoFarmHpThresholdPercent,

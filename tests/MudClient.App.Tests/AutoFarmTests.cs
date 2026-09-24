@@ -955,12 +955,12 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Contains(output, line => line.Contains("order Companion cast 'cure critical'"));
+            Assert.Contains(output, line => line.Contains("order Companion cast \"cure critical\" self"));
         }
         finally
         {
@@ -984,7 +984,7 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestHp", 100);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
@@ -1012,7 +1012,7 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
@@ -1043,14 +1043,14 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Single(output, line => line.Contains("order Companion cast 'cure critical'"));
+            Assert.Single(output, line => line.Contains("order Companion cast \"cure critical\" self"));
         }
         finally
         {
@@ -1072,7 +1072,7 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestCharacterName", "Hero");
             SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
@@ -1085,7 +1085,7 @@ public sealed class AutoFarmTests
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal(2, output.Count(line => line.Contains("order Companion cast 'cure critical'")));
+            Assert.Equal(2, output.Count(line => line.Contains("order Companion cast \"cure critical\" self")));
         }
         finally
         {
@@ -1109,7 +1109,7 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
             viewModel.AutoFarmHealOrderEnabled = true;
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();
@@ -1137,7 +1137,7 @@ public sealed class AutoFarmTests
             SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
             SetPrivateField(viewModel, "_latestHp", 10);
             SetPrivateField(viewModel, "_latestMaxHp", 100);
-            viewModel.AutoFarmHealOrderCommandsText = "cast 'cure critical'";
+            viewModel.AutoFarmHealOrderSpellNamesText = "cure critical";
 
             InvokePrivate(viewModel, "TryAutoFarmHealOrderGroup");
             Dispatcher.UIThread.RunJobs();

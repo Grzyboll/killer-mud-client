@@ -176,17 +176,17 @@ public sealed class HealthRecoveryPolicyTests
     public void ShouldCastCombatHeal_BelowThresholdMemorizedAndOffCooldown_ReturnsTrue()
     {
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts);
 
         Assert.Equal((true, "heal"), result);
     }
 
     [Fact]
-    public void ShouldCastCombatHeal_AutoFarmNotActive_ReturnsFalse()
+    public void ShouldCastCombatHeal_NotEnabled_ReturnsFalse()
     {
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: false, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: false, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts);
 
         Assert.False(result.ShouldCast);
@@ -196,7 +196,7 @@ public sealed class HealthRecoveryPolicyTests
     public void ShouldCastCombatHeal_AboveThreshold_ReturnsFalse()
     {
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 80, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 80, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts);
 
         Assert.False(result.ShouldCast);
@@ -208,7 +208,7 @@ public sealed class HealthRecoveryPolicyTests
         // Mid-combat there's no point latching onto MemorizeHeal/Rest — those need the
         // room-arrival flow, which can actually "mem"/"rest" outside of a fight.
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: [], skillTimeouts: NoTimeouts);
 
         Assert.False(result.ShouldCast);
@@ -220,7 +220,7 @@ public sealed class HealthRecoveryPolicyTests
         var timeouts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["heal"] = true };
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: timeouts);
 
         Assert.False(result.ShouldCast);
@@ -232,7 +232,7 @@ public sealed class HealthRecoveryPolicyTests
         var timeouts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["heal"] = false };
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: timeouts);
 
         Assert.Equal((true, "heal"), result);
@@ -244,7 +244,7 @@ public sealed class HealthRecoveryPolicyTests
         var timeouts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["other spell"] = true };
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: timeouts);
 
         Assert.Equal((true, "heal"), result);
@@ -256,7 +256,7 @@ public sealed class HealthRecoveryPolicyTests
         var timeouts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["Heal"] = true };
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: timeouts);
 
         Assert.False(result.ShouldCast);
@@ -280,7 +280,7 @@ public sealed class HealthRecoveryPolicyTests
         };
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["cure critical", "cure light"], memorizedSpells: spells, skillTimeouts: timeouts);
 
         Assert.False(result.ShouldCast);
@@ -298,7 +298,7 @@ public sealed class HealthRecoveryPolicyTests
         var lastCastAt = now - TimeSpan.FromSeconds(1);
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts,
             now: now, lastCastAt: lastCastAt);
 
@@ -312,7 +312,7 @@ public sealed class HealthRecoveryPolicyTests
         var lastCastAt = now - HealthRecoveryPolicy.MinCombatHealCastInterval - TimeSpan.FromMilliseconds(1);
 
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts,
             now: now, lastCastAt: lastCastAt);
 
@@ -326,7 +326,7 @@ public sealed class HealthRecoveryPolicyTests
         // the original skillTimeouts-only behavior — the interval check only ever engages when
         // both now and lastCastAt are supplied.
         var result = HealthRecoveryPolicy.ShouldCastCombatHeal(
-            autoFarmActive: true, hp: 30, maxHp: 100, thresholdPercent: 50,
+            enabled: true, hp: 30, maxHp: 100, thresholdPercent: 50,
             healSpellNames: ["heal"], memorizedSpells: HealMemorized, skillTimeouts: NoTimeouts,
             now: DateTimeOffset.UtcNow, lastCastAt: null);
 

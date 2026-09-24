@@ -95,20 +95,23 @@ public static class HealthRecoveryPolicy
     /// reported, cascading down the priority list once the strongest spell runs out of charges.</summary>
     public static readonly TimeSpan MinCombatHealCastInterval = TimeSpan.FromSeconds(2);
 
-    /// <summary>Whether an auto-farm heal cast should fire right now, mid-combat, in reaction to
-    /// a Char.Vitals GMCP update rather than waiting for the next room arrival, and which spell
+    /// <summary>Whether a heal cast should fire right now, mid-combat, in reaction to a
+    /// Char.Vitals GMCP update rather than waiting for the next room arrival, and which spell
     /// (from the priority list) to cast. Only ever resolves to a cast for an already-memorized
     /// spell (see <see cref="GetRecoveryAction"/>) — while fighting there's no point requesting
     /// <see cref="HealthRecoveryAction.MemorizeHeal"/> or <see cref="HealthRecoveryAction.Rest"/>,
-    /// those stay the room-arrival flow's job. Safe to call on every single vitals tick without
-    /// spamming duplicate casts: <paramref name="skillTimeouts"/> (Char.Skills.Timeout) reports
-    /// the spell still on cooldown for every tick between the first cast and the server clearing
-    /// it, so this stays false throughout — <paramref name="now"/>/<paramref name="lastCastAt"/>
-    /// back that up with <see cref="MinCombatHealCastInterval"/> for when the server's own timeout
-    /// report lags (see that constant's own xmldoc). Both are optional so existing callers that
-    /// don't track cast history keep working unchanged, just without the extra floor.</summary>
+    /// those stay the room-arrival flow's job (and, since this never mems, are simply unavailable
+    /// to a caller with no such flow at all — e.g. a follower character that just self-heals
+    /// without running auto-farm's own room-hop maintenance pass). Safe to call on every single
+    /// vitals tick without spamming duplicate casts: <paramref name="skillTimeouts"/>
+    /// (Char.Skills.Timeout) reports the spell still on cooldown for every tick between the first
+    /// cast and the server clearing it, so this stays false throughout —
+    /// <paramref name="now"/>/<paramref name="lastCastAt"/> back that up with
+    /// <see cref="MinCombatHealCastInterval"/> for when the server's own timeout report lags (see
+    /// that constant's own xmldoc). Both are optional so existing callers that don't track cast
+    /// history keep working unchanged, just without the extra floor.</summary>
     public static (bool ShouldCast, string? SpellName) ShouldCastCombatHeal(
-        bool autoFarmActive,
+        bool enabled,
         int? hp,
         int? maxHp,
         int thresholdPercent,
@@ -118,7 +121,7 @@ public static class HealthRecoveryPolicy
         DateTimeOffset? now = null,
         DateTimeOffset? lastCastAt = null)
     {
-        if (!autoFarmActive || !IsBelowThreshold(hp, maxHp, thresholdPercent))
+        if (!enabled || !IsBelowThreshold(hp, maxHp, thresholdPercent))
         {
             return (false, null);
         }

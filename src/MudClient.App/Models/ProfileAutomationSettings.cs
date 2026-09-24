@@ -124,14 +124,25 @@ public sealed class ProfileAutomationSettings
     public bool AutoAssistNpcEnabled { get; set; }
 
     /// <summary>While auto-farm is running: orders every other (non-leader-self) group member to
-    /// run <see cref="AutoFarmHealOrderCommandsText"/> as soon as this character's own HP drops
-    /// below the farm's HP threshold — same "order" fan-out as <see cref="AutoStandOrderEnabled"/>,
-    /// so it only actually sends anything while this character is the group's GMCP leader.</summary>
+    /// cast each of <see cref="AutoFarmHealOrderSpellNamesText"/> on themselves as soon as this
+    /// character's own HP drops below the farm's HP threshold — same "order" fan-out as
+    /// <see cref="AutoStandOrderEnabled"/>, so it only actually sends anything while this
+    /// character is the group's GMCP leader.</summary>
     public bool AutoFarmHealOrderEnabled { get; set; }
 
-    /// <summary>Commands ordered to every other group member — see
-    /// <see cref="AutoFarmHealOrderEnabled"/>. One command per line, sent to each member in turn.</summary>
-    public string AutoFarmHealOrderCommandsText { get; set; } = string.Empty;
+    /// <summary>Heal spell names ordered onto every other group member (each becomes
+    /// <c>order &lt;member&gt; cast "&lt;name&gt;" self</c>) — see
+    /// <see cref="AutoFarmHealOrderEnabled"/>. One name per line, sent to each member in turn.</summary>
+    public string AutoFarmHealOrderSpellNamesText { get; set; } = string.Empty;
+
+    /// <summary>Casts the strongest already-memorized entry from
+    /// <c>AutoFarmHealSpellNamesText</c> on self the moment this character's own HP drops below
+    /// the farm's HP threshold — the same reaction <see cref="Core.Automation.HealthRecoveryPolicy.ShouldCastCombatHeal"/>
+    /// already gives auto-farm, but usable without running the farm itself (no walking, no
+    /// mem-and-rest maintenance pass — only ever casts what's already memorized). For a follower
+    /// character that just uses <see cref="AutoFollowLeaderEnabled"/> and needs to survive on its
+    /// own between fights.</summary>
+    public bool AutoSelfHealEnabled { get; set; }
 
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>

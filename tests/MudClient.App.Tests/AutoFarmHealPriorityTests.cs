@@ -158,6 +158,94 @@ public sealed class AutoFarmHealPriorityTests
     }
 
     [AvaloniaFact]
+    public async Task TryAutoFarmCombatHeal_AutoSelfHealEnabledButAutoFarmNotActive_StillCasts()
+    {
+        // The point of AutoSelfHealEnabled: a follower character that never runs auto-farm's own
+        // walking should still be able to react to its own dropping HP.
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+
+        try
+        {
+            viewModel.AutoSelfHealEnabled = true;
+            SetPrivateField(viewModel, "_autoFarmActive", false);
+            SetPrivateField(viewModel, "_autoFarmHealSpellNames", new List<string> { "cure critical" });
+            SetPrivateField(viewModel, "_autoFarmHpThresholdPercent", 50);
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            SetPrivateField(viewModel, "_latestMemorizedSpells", new List<MemorizedSpell>
+            {
+                new(1, 1, "cure critical", Memed: true, Meming: false),
+            });
+
+            InvokePrivate(viewModel, "TryAutoFarmCombatHeal");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("cure critical"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmCombatHeal_NeitherAutoFarmActiveNorAutoSelfHealEnabled_DoesNotCast()
+    {
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", false);
+            SetPrivateField(viewModel, "_autoFarmHealSpellNames", new List<string> { "cure critical" });
+            SetPrivateField(viewModel, "_autoFarmHpThresholdPercent", 50);
+            SetPrivateField(viewModel, "_latestHp", 10);
+            SetPrivateField(viewModel, "_latestMaxHp", 100);
+            SetPrivateField(viewModel, "_latestMemorizedSpells", new List<MemorizedSpell>
+            {
+                new(1, 1, "cure critical", Memed: true, Meming: false),
+            });
+
+            InvokePrivate(viewModel, "TryAutoFarmCombatHeal");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("cure critical"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task AutoSelfHealEnabled_PersistsToActiveProfile()
+    {
+        var directory = CreateDirectory();
+        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+
+        try
+        {
+            Assert.False(viewModel.AutoSelfHealEnabled);
+
+            viewModel.AutoSelfHealEnabled = true;
+
+            Assert.True(viewModel.AutoSelfHealEnabled);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task TryAutoFarmCombatHeal_NothingMemorized_DoesNotCastAnything()
     {
         var directory = CreateDirectory();

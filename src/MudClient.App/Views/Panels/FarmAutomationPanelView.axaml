@@ -37,6 +37,13 @@
       <Border Classes="mud-section" Padding="10">
         <StackPanel Spacing="10">
           <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoSelfHealEnabled}"
+                      Content="Autoleczenie — lecz się sam poniżej progu, nawet bez uruchomionej farmy" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Ta sama reakcja co w farmie, ale działa niezależnie od niej — rzuca najsilniejsze z „Zaklęć leczących” poniżej, które akurat jest zapamiętane, gdy tylko HP spadnie poniżej progu. Nie memuje ani nie odpoczywa (to wymaga chodzenia po pokojach farmy) — przydatne dla postaci, która tylko podąża za liderem (Autofollow, Automaty → Podróż) i sama nie może się zamemować." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Classes="mud-label" Text="Próg HP" />
               <Border Grid.Column="1" Classes="mud-badge mud-badge-gold">
@@ -49,6 +56,20 @@
                     TickFrequency="5" IsSnapToTickEnabled="True" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                        Text="Farma przerywa chodzenie i zaczyna się leczyć, gdy aktualne HP spadnie do tego procentu maksimum lub niżej." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmHealOrderEnabled}"
+                      Content="Ordery lecznicze — każ drużynie się leczyć, gdy moje HP spadnie poniżej progu" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Ten sam próg HP powyżej: gdy Twoje HP spadnie poniżej niego, klient wyśle poniższe zaklęcia jako „order &lt;członek&gt; cast &quot;&lt;zaklęcie&gt;&quot; self” do każdego innego członka drużyny (raz na spadek HP — nie spamuje, dopóki nie wrócisz powyżej progu). Wymaga bycia liderem drużyny GMCP, tak jak zwykłe „order” — jeśli nie jesteś liderem, użyj zamiast tego „Zdalnego sterowania” w panelu Automaty → Drużyna." />
+            <TextBox MinHeight="64"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jedno zaklęcie na linię, np. cure critical&#x0a;cure serious"
+                     Text="{Binding AutoFarmHealOrderSpellNamesText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Możesz wpisać wiele wierszy lub rozdzielić nazwy separatorem ustawionym w opcjach klienta — każde zaklęcie zostanie zlecone każdemu członkowi drużyny." />
           </StackPanel>
 
           <StackPanel Spacing="3">

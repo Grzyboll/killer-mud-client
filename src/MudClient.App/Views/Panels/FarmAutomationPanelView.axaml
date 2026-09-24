@@ -70,6 +70,10 @@
                      Text="{Binding AutoFarmHealOrderSpellNamesText, UpdateSourceTrigger=PropertyChanged}" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                        Text="Możesz wpisać wiele wierszy lub rozdzielić nazwy separatorem ustawionym w opcjach klienta — każde zaklęcie zostanie zlecone każdemu członkowi drużyny." />
+            <CheckBox IsChecked="{Binding AutoFarmHealOrderMemEnabled}"
+                      Content="Domemuj, gdy trzeba" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Przed każdym „cast” wyśle też „order &lt;członek&gt; mem &quot;&lt;zaklęcie&gt;&quot;”. Klient nie widzi, czy dany członek ma akurat to zaklęcie zapamiętane (GMCP podaje tylko ile mu zostało punktów pamięci, nie które zaklęcia zna), więc zlecenie mema leci za każdym razem — u kogoś, kto już je ma zapamiętane, to nic nie zmienia, a u kogoś, komu się skończyło, zostanie zapamiętane na czas kolejnego spadku HP." />
           </StackPanel>
 
           <StackPanel Spacing="3">

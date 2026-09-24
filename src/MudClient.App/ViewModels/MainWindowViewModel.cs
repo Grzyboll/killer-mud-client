@@ -2554,6 +2554,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmRestOrderEnabled"/>.</summary>
+    public bool AutoFarmRestOrderEnabled
+    {
+        get => _profileSettings.AutoFarmRestOrderEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmRestOrderEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmRestOrderEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public bool AutoStandOnLyingEnabled
     {
         get => _profileSettings.AutoStandOnLyingEnabled;
@@ -3006,6 +3023,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoFarmHealOrderSpellNamesText));
         OnPropertyChanged(nameof(AutoFarmHealOrderMemEnabled));
         OnPropertyChanged(nameof(AutoSelfHealEnabled));
+        OnPropertyChanged(nameof(AutoFarmRestOrderEnabled));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
@@ -5692,6 +5710,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         _autoFarmHealRecoveryAttempts = 0;
+        TryAutoFarmRestOrderGroup();
 
         if (_autoFarmRegions.Count == 0)
         {
@@ -7115,6 +7134,48 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             .SelectMany(name => healSpellNames.SelectMany(spell => includeMem
                 ? new[] { $"order {name} mem \"{spell}\"", $"order {name} cast \"{spell}\" self" }
                 : new[] { $"order {name} cast \"{spell}\" self" }))
+            .ToArray();
+    }
+
+    /// <summary>Orders every other group member not already resting to rest, right before the
+    /// farm's next room-hop decision — see <see cref="AutoFarmRestOrderEnabled"/>'s own xmldoc for
+    /// why (walking companions through aggressive-mob rooms while they stay seated). Fire-and-
+    /// forget: unlike the HP-threshold/mem checks in <see cref="ContinueAutoFarm"/>, never blocks
+    /// or delays the farm's own walking.</summary>
+    private void TryAutoFarmRestOrderGroup()
+    {
+        if (!IsConnected)
+        {
+            return;
+        }
+
+        var commands = BuildAutoFarmRestOrderCommands(
+            _latestGroupUpdate, _latestCharacterName, AutoFarmRestOrderEnabled);
+        if (commands.Count > 0)
+        {
+            QueueTriggeredCommands(commands);
+        }
+    }
+
+    /// <summary>Pure decision behind <see cref="TryAutoFarmRestOrderGroup"/>: an
+    /// "order &lt;name&gt; rest" for every other group member whose own GMCP position isn't
+    /// already "resting" — skips anyone already resting so this doesn't re-order it on every
+    /// single farm decision. Empty unless <paramref name="enabled"/> and we're the group's own
+    /// leader (mirrors <see cref="BuildGroupPositionOrderCommands"/>).</summary>
+    internal static IReadOnlyList<string> BuildAutoFarmRestOrderCommands(
+        CharacterGroupUpdate? group, string? selfName, bool enabled)
+    {
+        if (!enabled || group is null
+            || !string.Equals(group.Leader, selfName, StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        return group.Members
+            .Where(member => !member.IsNpc
+                && !string.Equals(member.Name, selfName, StringComparison.OrdinalIgnoreCase)
+                && !AutowalkRecoveryPolicy.IsRestingPosition(member.Position))
+            .Select(member => $"order {member.Name} rest")
             .ToArray();
     }
 

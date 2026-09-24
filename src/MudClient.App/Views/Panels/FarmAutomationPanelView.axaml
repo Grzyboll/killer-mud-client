@@ -77,6 +77,13 @@
           </StackPanel>
 
           <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmRestOrderEnabled}"
+                      Content="Ordery odpoczynku — każ drużynie odpoczywać, gdy Ty wchodzisz w kolejny pokój" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Przed każdym wejściem do kolejnego pokoju farmy wyśle „order &lt;członek&gt; rest” do każdego innego członka drużyny, który akurat nie odpoczywa. Pomyślane do wchodzenia w lokacje z agresywnymi mobami atakującymi losowy cel — drużyna zostaje na miejscu, odpoczywając (więc zwykle poza pulą losowych celów), a idziesz i walczysz tylko Ty. Warto połączyć z buffem utrzymywanym stale na sobie (patrz „Zaklęcia rzucane po zaatakowaniu przeciwnika” poniżej — zwykła linia bez „!” jest odświeżana nie tylko na starcie walki, ale przy każdym wejściu do pokoju) oraz z Autofollow (Automaty → Podróż) po stronie towarzysza, żeby dogonił Cię, gdy skończysz." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Classes="mud-label" Text="Odczekaj po wejściu do pokoju" />
               <Border Grid.Column="1" Classes="mud-badge mud-badge-gold">

@@ -1212,4 +1212,86 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // TryAutoFarmRestOrderGroup — "Ordery odpoczynku" (Auto: Farma → Leczenie i odpoczynek)
+    // ====================================================================
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmRestOrderGroup_Enabled_OrdersCompanionToRest()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            viewModel.AutoFarmRestOrderEnabled = true;
+
+            InvokePrivate(viewModel, "TryAutoFarmRestOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("order Companion rest"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmRestOrderGroup_Disabled_DoesNotOrder()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+
+            InvokePrivate(viewModel, "TryAutoFarmRestOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.DoesNotContain(output, line => line.Contains("order Companion"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmRestOrderGroup_DoesNotRequireAutoFarmActive()
+    {
+        // Unlike the HP-threshold heal order, resting the group isn't gated on the farm actually
+        // walking — it's meant to also fire from ContinueAutoFarm's own maintenance pass, which
+        // this test exercises directly rather than through the full room-hop machinery.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", false);
+            SetPrivateField(viewModel, "_latestCharacterName", "Hero");
+            SetPrivateField(viewModel, "_latestGroupUpdate", LeaderAndCompanion("Hero"));
+            viewModel.AutoFarmRestOrderEnabled = true;
+
+            InvokePrivate(viewModel, "TryAutoFarmRestOrderGroup");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("order Companion rest"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

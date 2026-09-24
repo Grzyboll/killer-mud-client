@@ -351,6 +351,73 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     [Fact]
+    public void BuildAutoFarmRestOrderCommands_Disabled_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: false));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_NotTheLeader_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Companion", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_AsLeader_OrdersEveryOtherStandingMember()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Wolf", "standing", string.Empty, null, string.Empty, null, null, true, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true);
+
+        // Only "Companion" — Wolf is an NPC and Hero is self, neither gets ordered.
+        Assert.Equal(["order Companion rest"], commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_MemberAlreadyResting_IsSkipped()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "resting", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_MixOfRestingAndStandingMembers_OnlyOrdersStanding()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("AlreadyResting", "resting", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("StillStanding", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true);
+
+        Assert.Equal(["order StillStanding rest"], commands);
+    }
+
+    [Fact]
     public void BuildAutoAssistNpcCommands_Disabled_ReturnsEmpty()
     {
         var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>

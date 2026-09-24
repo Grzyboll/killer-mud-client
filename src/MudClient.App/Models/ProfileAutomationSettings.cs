@@ -153,6 +153,17 @@ public sealed class ProfileAutomationSettings
     /// own between fights.</summary>
     public bool AutoSelfHealEnabled { get; set; }
 
+    /// <summary>While auto-farm is running: orders every other (non-self) group member not
+    /// already resting to "rest", right before each room-hop decision — for walking into rooms
+    /// with aggressive mobs that pick a random target, so companions stay seated (and so, in most
+    /// MUDs, out of the random-aggro pool) while only the leader actually walks in and draws
+    /// attention. Combined with a self-buff in <see cref="AutoFarmCastSequence"/> (e.g. a
+    /// protective ward) kept up by the farm's own room-hop maintenance pass, and the companion's
+    /// own <see cref="AutoFollowLeaderEnabled"/> to catch up once the leader has moved on. Same
+    /// "order" fan-out as <see cref="AutoStandOrderEnabled"/>, so it only actually sends anything
+    /// while this character is the group's GMCP leader.</summary>
+    public bool AutoFarmRestOrderEnabled { get; set; }
+
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>
     public bool AutoStandOnLyingEnabled { get; set; }

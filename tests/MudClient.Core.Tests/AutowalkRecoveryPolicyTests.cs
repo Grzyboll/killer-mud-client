@@ -172,4 +172,16 @@ public sealed class AutowalkRecoveryPolicyTests
     {
         Assert.False(AutowalkRecoveryPolicy.IsMemorizingSpell([], "heal"));
     }
+    [Theory]
+    [InlineData("resting", false)]
+    [InlineData("RESTING", false)]
+    [InlineData("standing", false)]
+    [InlineData("sleeping", true)]
+    [InlineData("SLEEPING", true)]
+    [InlineData("sitting", true)]
+    [InlineData(null, false)]
+    public void RequiresStandBeforeMovement_DistinguishesRestFromSleep(string? position, bool expected)
+    {
+        Assert.Equal(expected, AutowalkRecoveryPolicy.RequiresStandBeforeMovement(position));
+    }
 }

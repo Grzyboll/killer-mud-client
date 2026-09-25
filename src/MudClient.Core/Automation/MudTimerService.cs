@@ -23,11 +23,12 @@ public sealed class MudTimerService : IAsyncDisposable
         Start(name, interval, periodic: true, callback);
     }
 
-    public void CancelAll()
+    public void CancelAll(string? exceptName = null)
     {
         foreach (var timerName in _timers.Keys)
         {
-            Cancel(timerName);
+            if (!string.Equals(timerName, exceptName, StringComparison.OrdinalIgnoreCase))
+                Cancel(timerName);
         }
     }
 

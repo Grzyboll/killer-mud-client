@@ -911,6 +911,124 @@ public sealed class MapViewModelTests
     }
 
     [Fact]
+    public void CutMarkerFromSelectedRoomCommand_WithoutMarker_CannotExecute()
+    {
+        using var vm = CreateViewModel();
+        vm.SelectedRoom = CreateSampleRoom();
+
+        Assert.False(vm.CutMarkerFromSelectedRoomCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void CutMarkerFromSelectedRoomCommand_RemovesMarkerAndEnablesPaste()
+    {
+        using var vm = CreateViewModel();
+        vm.SelectedRoom = CreateSampleRoom();
+        vm.SetMarkerOnSelectedRoomCommand.Execute("!!");
+        Assert.False(vm.HasCutMarker);
+        Assert.False(vm.PasteMarkerOnSelectedRoomCommand.CanExecute(null));
+
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+
+        Assert.False(vm.SelectedRoomHasMarker);
+        Assert.True(vm.HasCutMarker);
+        Assert.True(vm.PasteMarkerOnSelectedRoomCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void PasteMarkerOnSelectedRoomCommand_WithoutCutMarker_CannotExecute()
+    {
+        using var vm = CreateViewModel();
+        vm.SelectedRoom = CreateSampleRoom();
+
+        Assert.False(vm.PasteMarkerOnSelectedRoomCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void CutThenPaste_MovesSymbolAndNoteToTheNewRoom()
+    {
+        using var vm = CreateViewModel();
+        var wrongRoom = CreateSampleRoom();
+        var correctRoom = RoomWithVnum(2, 1, "200", new MapCoordinates(30, 40, 5));
+        SetMapIndexThroughProperty(vm, BuildIndex(wrongRoom, correctRoom));
+        vm.SelectedRoom = wrongRoom;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("!!");
+        vm.SetNoteOnSelectedRoom("Smok Pustynny");
+
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+        vm.SelectedRoom = correctRoom;
+        vm.PasteMarkerOnSelectedRoomCommand.Execute(null);
+
+        Assert.True(vm.SelectedRoomHasMarker);
+        var marker = Assert.Single(vm.RoomMarkers, m => m.Room.Id == correctRoom.Id);
+        Assert.Equal("!!", marker.Symbol);
+        Assert.Equal("Smok Pustynny", marker.Note);
+        Assert.DoesNotContain(vm.RoomMarkers, m => m.Room.Id == wrongRoom.Id);
+    }
+
+    [Fact]
+    public void PasteMarkerOnSelectedRoomCommand_DoesNotConsumeTheCutMarker_CanPasteOntoMultipleRooms()
+    {
+        using var vm = CreateViewModel();
+        var sourceRoom = CreateSampleRoom();
+        var firstTarget = RoomWithVnum(2, 1, "200", new MapCoordinates(30, 40, 5));
+        var secondTarget = RoomWithVnum(3, 1, "300", new MapCoordinates(50, 60, 5));
+        SetMapIndexThroughProperty(vm, BuildIndex(sourceRoom, firstTarget, secondTarget));
+        vm.SelectedRoom = sourceRoom;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("R");
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+
+        vm.SelectedRoom = firstTarget;
+        vm.PasteMarkerOnSelectedRoomCommand.Execute(null);
+        vm.SelectedRoom = secondTarget;
+        vm.PasteMarkerOnSelectedRoomCommand.Execute(null);
+
+        Assert.Contains(vm.RoomMarkers, m => m.Room.Id == firstTarget.Id && m.Symbol == "R");
+        Assert.Contains(vm.RoomMarkers, m => m.Room.Id == secondTarget.Id && m.Symbol == "R");
+    }
+
+    [Fact]
+    public void PasteMarkerOnSelectedRoomCommand_ReplacesWhateverMarkerWasAlreadyThere()
+    {
+        using var vm = CreateViewModel();
+        var sourceRoom = CreateSampleRoom();
+        var targetRoom = RoomWithVnum(2, 1, "200", new MapCoordinates(30, 40, 5));
+        SetMapIndexThroughProperty(vm, BuildIndex(sourceRoom, targetRoom));
+        vm.SelectedRoom = sourceRoom;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("!!");
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+        vm.SelectedRoom = targetRoom;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("X");
+
+        vm.PasteMarkerOnSelectedRoomCommand.Execute(null);
+
+        var marker = Assert.Single(vm.RoomMarkers, m => m.Room.Id == targetRoom.Id);
+        Assert.Equal("!!", marker.Symbol);
+    }
+
+    [Fact]
+    public void CuttingAnotherMarker_ReplacesThePreviouslyCutOne()
+    {
+        using var vm = CreateViewModel();
+        var firstSource = CreateSampleRoom();
+        var secondSource = RoomWithVnum(2, 1, "200", new MapCoordinates(30, 40, 5));
+        var targetRoom = RoomWithVnum(3, 1, "300", new MapCoordinates(50, 60, 5));
+        SetMapIndexThroughProperty(vm, BuildIndex(firstSource, secondSource, targetRoom));
+        vm.SelectedRoom = firstSource;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("!!");
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+        vm.SelectedRoom = secondSource;
+        vm.SetMarkerOnSelectedRoomCommand.Execute("R");
+        vm.CutMarkerFromSelectedRoomCommand.Execute(null);
+
+        vm.SelectedRoom = targetRoom;
+        vm.PasteMarkerOnSelectedRoomCommand.Execute(null);
+
+        var marker = Assert.Single(vm.RoomMarkers, m => m.Room.Id == targetRoom.Id);
+        Assert.Equal("R", marker.Symbol);
+    }
+
+    [Fact]
     public void SettingNewMarker_ReplacesPreviousOneForSameRoom()
     {
         using var vm = CreateViewModel();

@@ -127,6 +127,47 @@ public sealed class ProfileAutomationSettings
     /// soon as the local character's own position becomes "fighting".</summary>
     public bool AutoAssistNpcEnabled { get; set; }
 
+    /// <summary>While auto-farm is running: orders every other (non-leader-self) group member to
+    /// cast each of <see cref="AutoFarmHealOrderSpellNamesText"/> on themselves as soon as this
+    /// character's own HP drops below the farm's HP threshold — same "order" fan-out as
+    /// <see cref="AutoStandOrderEnabled"/>, so it only actually sends anything while this
+    /// character is the group's GMCP leader.</summary>
+    public bool AutoFarmHealOrderEnabled { get; set; }
+
+    /// <summary>Heal spell names ordered onto every other group member (each becomes
+    /// <c>order &lt;member&gt; cast "&lt;name&gt;" self</c>) — see
+    /// <see cref="AutoFarmHealOrderEnabled"/>. One name per line, sent to each member in turn.</summary>
+    public string AutoFarmHealOrderSpellNamesText { get; set; } = string.Empty;
+
+    /// <summary>Also orders <c>mem "&lt;name&gt;"</c> right before each cast in
+    /// <see cref="AutoFarmHealOrderSpellNamesText"/> — there's no GMCP visibility into whether a
+    /// group member still has a specific spell memorized (only a coarse remaining-mem-points
+    /// count), so this just keeps re-ordering the mem alongside the cast every time the heal
+    /// order fires; harmless against a spell that's already memorized, and means a companion who
+    /// ran out gets it re-memorized in time for the next HP dip instead of the order silently
+    /// failing forever.</summary>
+    public bool AutoFarmHealOrderMemEnabled { get; set; }
+
+    /// <summary>Casts the strongest already-memorized entry from
+    /// <c>AutoFarmHealSpellNamesText</c> on self the moment this character's own HP drops below
+    /// the farm's HP threshold — the same reaction <see cref="Core.Automation.HealthRecoveryPolicy.ShouldCastCombatHeal"/>
+    /// already gives auto-farm, but usable without running the farm itself (no walking, no
+    /// mem-and-rest maintenance pass — only ever casts what's already memorized). For a follower
+    /// character that just uses <see cref="AutoFollowLeaderEnabled"/> and needs to survive on its
+    /// own between fights.</summary>
+    public bool AutoSelfHealEnabled { get; set; }
+
+    /// <summary>While auto-farm is running: orders every other (non-self) group member not
+    /// already resting to "rest", right before each room-hop decision — for walking into rooms
+    /// with aggressive mobs that pick a random target, so companions stay seated (and so, in most
+    /// MUDs, out of the random-aggro pool) while only the leader actually walks in and draws
+    /// attention. Combined with a self-buff in <see cref="AutoFarmCastSequence"/> (e.g. a
+    /// protective ward) kept up by the farm's own room-hop maintenance pass, and the companion's
+    /// own <see cref="AutoFollowLeaderEnabled"/> to catch up once the leader has moved on. Same
+    /// "order" fan-out as <see cref="AutoStandOrderEnabled"/>, so it only actually sends anything
+    /// while this character is the group's GMCP leader.</summary>
+    public bool AutoFarmRestOrderEnabled { get; set; }
+
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>
     public bool AutoStandOnLyingEnabled { get; set; }

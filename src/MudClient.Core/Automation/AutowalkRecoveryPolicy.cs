@@ -43,6 +43,12 @@ public static class AutowalkRecoveryPolicy
     public static bool IsSittingPosition(string? position) =>
         string.Equals(position, "sitting", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>KillerMUD allows movement while resting. Sitting and sleeping require stand.
+    /// Timed low-movement recovery and an explicit mid-route rest keep their own pause lifecycle.</summary>
+    public static bool RequiresStandBeforeMovement(string? position) =>
+        string.Equals(position, "sleeping", StringComparison.OrdinalIgnoreCase) ||
+        IsSittingPosition(position);
+
     /// <summary>True when GMCP confirms that the character can resume walking.</summary>
     public static bool IsStandingPosition(string? position) =>
         string.Equals(position, "standing", StringComparison.OrdinalIgnoreCase);

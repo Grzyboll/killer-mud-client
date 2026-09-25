@@ -37,7 +37,9 @@ public sealed class AutowalkMovementRecoveryCapTests
         var directory = Path.Combine(
             Path.GetTempPath(), "KillerMudClient_MovementRecoveryCapTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {
@@ -84,7 +86,9 @@ public sealed class AutowalkMovementRecoveryCapTests
         var directory = Path.Combine(
             Path.GetTempPath(), "KillerMudClient_MovementRecoveryCapTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {

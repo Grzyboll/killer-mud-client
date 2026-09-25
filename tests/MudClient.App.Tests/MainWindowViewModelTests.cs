@@ -26,8 +26,17 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
             profileService: new ProfileService(Path.Combine(_tempDir, "Profiles")),
             settingsService: new AppSettingsService(_tempDir),
             dockLayoutService: new DockLayoutService(_tempDir),
+            layoutPresetService: new LayoutPresetService(_tempDir),
             groupSpellStore: new GroupSpellStore(Path.Combine(_tempDir, "group-spells.json")),
             experienceStatisticsStore: new ExperienceStatisticsStore(Path.Combine(_tempDir, "Statistics")));
+    }
+
+    private MainWindowViewModel CreateIsolatedViewModel()
+    {
+        var directory = Path.Combine(_tempDir, Guid.NewGuid().ToString("N"));
+        return new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
     }
 
     public async ValueTask DisposeAsync()
@@ -243,6 +252,183 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     }
 
     [Fact]
+    public void BuildAutoFarmHealOrderCommands_Disabled_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: false));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_NotTheLeader_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Companion", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_NoSpellsConfigured_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(group, "Hero", [], enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_AsLeader_OrdersEveryOtherMemberToCastOnSelf()
+    {
+        // Regression target: entries are spell names, not raw commands — the order sent must
+        // wrap each in "cast \"<name>\" self" so the companion actually casts it, instead of the
+        // MUD rejecting a bare spell name as an unknown command.
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Wolf", null, string.Empty, null, string.Empty, null, null, true, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical", "cure serious"], enabled: true);
+
+        // Only "Companion" — Wolf is an NPC and Hero is self, neither gets ordered.
+        Assert.Equal(
+            ["order Companion cast \"cure critical\" self", "order Companion cast \"cure serious\" self"],
+            commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_IncludeMemFalse_NeverSendsMem()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: true, includeMem: false);
+
+        Assert.Equal(["order Companion cast \"cure critical\" self"], commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_IncludeMemTrue_SendsMemBeforeEachCast()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical", "cure serious"], enabled: true, includeMem: true);
+
+        Assert.Equal(
+            [
+                "order Companion mem \"cure critical\"",
+                "order Companion cast \"cure critical\" self",
+                "order Companion mem \"cure serious\"",
+                "order Companion cast \"cure serious\" self",
+            ],
+            commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmHealOrderCommands_IncludeMemTrueButDisabled_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", null, string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmHealOrderCommands(
+            group, "Hero", ["cure critical"], enabled: false, includeMem: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_Disabled_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: false));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_NotTheLeader_ReturnsEmpty()
+    {
+        var group = new CharacterGroupUpdate("Companion", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_AsLeader_OrdersEveryOtherStandingMember()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("Wolf", "standing", string.Empty, null, string.Empty, null, null, true, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true);
+
+        // Only "Companion" — Wolf is an NPC and Hero is self, neither gets ordered.
+        Assert.Equal(["order Companion rest"], commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_MemberAlreadyResting_IsSkipped()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("Companion", "resting", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        Assert.Empty(MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true));
+    }
+
+    [Fact]
+    public void BuildAutoFarmRestOrderCommands_MixOfRestingAndStandingMembers_OnlyOrdersStanding()
+    {
+        var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
+        {
+            new("Hero", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: true),
+            new("AlreadyResting", "resting", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+            new("StillStanding", "standing", string.Empty, null, string.Empty, null, null, false, null, IsLeader: false),
+        });
+
+        var commands = MainWindowViewModel.BuildAutoFarmRestOrderCommands(group, "Hero", enabled: true);
+
+        Assert.Equal(["order StillStanding rest"], commands);
+    }
+
+    [Fact]
     public void BuildAutoAssistNpcCommands_Disabled_ReturnsEmpty()
     {
         var group = new CharacterGroupUpdate("Hero", new List<CharacterGroupMember>
@@ -354,7 +540,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: false, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: false, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out var leader);
 
         Assert.False(result);
@@ -367,30 +554,66 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: false, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: false, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
     }
 
     [Fact]
-    public void ShouldAutoFollowLeader_AlreadyAutowalking_ReturnsFalse()
+    public void ShouldAutoFollowLeader_AlreadyAutowalkingUnrelatedWalk_ReturnsFalse()
     {
-        // Don't yank control from an unrelated walk already in progress (e.g. auto-farm).
+        // Don't yank control from an unrelated walk already in progress (e.g. auto-farm) — only a
+        // follow walk itself (isFollowWalk: true) is ever redirected.
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: true, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
+    }
+
+    [Fact]
+    public void ShouldAutoFollowLeader_FollowWalkStillHeadingToLeadersRoom_ReturnsFalse()
+    {
+        // Leader hasn't moved since this follow walk started — nothing to redirect to.
+        var group = TwoMemberGroup("Hero", "200");
+
+        var result = MainWindowViewModel.ShouldAutoFollowLeader(
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: true,
+            followWalkTargetVnum: "200", position: "standing",
+            group, selfName: "Companion", currentVnum: "150", out _);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void ShouldAutoFollowLeader_FollowWalkLeaderMovedOn_ReturnsTrueWithNewLeaderRoom()
+    {
+        // Regression target: the leader moved again while this follow walk was still headed to
+        // their OLD room — must redirect toward the new one instead of finishing the stale route
+        // (the "overshoots/runs off too far" symptom this exists to fix).
+        var group = TwoMemberGroup("Hero", "300");
+
+        var result = MainWindowViewModel.ShouldAutoFollowLeader(
+            enabled: true, isConnected: true, isAutowalking: true, isFollowWalk: true,
+            followWalkTargetVnum: "200", position: "standing",
+            group, selfName: "Companion", currentVnum: "150", out var leader);
+
+        Assert.True(result);
+        Assert.NotNull(leader);
+        Assert.Equal("300", leader.Room);
     }
 
     [Fact]
     public void ShouldAutoFollowLeader_NullGroup_ReturnsFalse()
     {
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             update: null, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -402,7 +625,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Companion", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -414,7 +638,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "fighting",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "fighting",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -426,7 +651,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", leaderRoom: null);
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out _);
 
         Assert.False(result);
@@ -438,7 +664,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: null, out _);
 
         Assert.False(result);
@@ -450,7 +677,8 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "200", out _);
 
         Assert.False(result);
@@ -462,13 +690,152 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var group = TwoMemberGroup("Hero", "200");
 
         var result = MainWindowViewModel.ShouldAutoFollowLeader(
-            enabled: true, isConnected: true, isAutowalking: false, position: "standing",
+            enabled: true, isConnected: true, isAutowalking: false, isFollowWalk: false,
+            followWalkTargetVnum: null, position: "standing",
             group, selfName: "Companion", currentVnum: "100", out var leader);
 
         Assert.True(result);
         Assert.NotNull(leader);
         Assert.Equal("Hero", leader.Name);
         Assert.Equal("200", leader.Room);
+    }
+
+    // ====================================================================
+    // TryBuildLeaderTrailPath — retrace the leader's actual steps instead of the pathfinder's own
+    // shortest route (Automaty → Podróż → Autofollow)
+    // ====================================================================
+
+    private static MapRoom CreateRoomWithExits(int id, string vnum, params (string Name, int Target)[] exits) => new()
+    {
+        Id = id,
+        AreaId = 1,
+        Coordinates = new MapCoordinates(id, 0, 0),
+        UserData = new Dictionary<string, JsonElement>
+        {
+            ["vnum"] = JsonSerializer.SerializeToElement(vnum),
+        },
+        Exits = exits.Select(e => new MapExit { ExitId = e.Target, Name = e.Name }).ToList(),
+    };
+
+    /// <summary>Diamond layout: 1↔2↔3↔4 the long way around (three steps), plus a direct 1↔4
+    /// shortcut (one step) the pathfinder's own shortest-path search would always prefer — so a
+    /// path that goes 1→2→3→4 instead of straight 1→4 can only have come from following the
+    /// trail, never from FindPathByVnum.</summary>
+    private static MapIndex CreateDiamondMapIndex() => new(new MapDocument
+    {
+        Areas =
+        [
+            new MapArea
+            {
+                Id = 1,
+                Rooms =
+                [
+                    CreateRoomWithExits(1, "1", ("north", 2), ("east", 4)),
+                    CreateRoomWithExits(2, "2", ("south", 1), ("north", 3)),
+                    CreateRoomWithExits(3, "3", ("south", 2), ("north", 4)),
+                    CreateRoomWithExits(4, "4", ("south", 3), ("west", 1)),
+                ],
+            },
+        ],
+    });
+
+    private List<string> GetLeaderRoomTrail() => (List<string>)typeof(MainWindowViewModel)
+        .GetField("_leaderRoomTrail", BindingFlags.NonPublic | BindingFlags.Instance)!
+        .GetValue(_vm)!;
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_NoMapIndex_ReturnsNull()
+    {
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_FromNotInTrail_ReturnsNull()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["2", "3", "4"]);
+
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ToBeforeFromInTrail_ReturnsNull()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["4", "3", "2", "1"]);
+
+        // "4" is earlier in the trail than "1" — the leader was there before, not on the way there.
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_SameRoom_ReturnsEmptyPath()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "2"]);
+
+        var path = _vm.TryBuildLeaderTrailPath("1", "1");
+
+        Assert.NotNull(path);
+        Assert.Empty(path!.Steps);
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ValidTrail_FollowsTrailOrderNotTheShortcut()
+    {
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "2", "3", "4"]);
+
+        var path = _vm.TryBuildLeaderTrailPath("1", "4");
+
+        Assert.NotNull(path);
+        Assert.Equal(["north", "north", "north"], path!.Steps.Select(step => step.Command));
+        Assert.Equal(["2", "3", "4"], path.Steps.Select(step => step.ToRoom.Vnum));
+    }
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_ConsecutiveTrailRoomsNotAdjacent_ReturnsNull()
+    {
+        // Simulates a teleport/recall between two trail entries — "1" and "3" both appear in the
+        // trail but aren't directly connected on the map (only "1"-"2" and "2"-"3"/"north" are).
+        SetMapViewModelMapIndex(CreateDiamondMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "3", "4"]);
+
+        Assert.Null(_vm.TryBuildLeaderTrailPath("1", "4"));
+    }
+
+    private static CharacterGroupUpdate GroupWithLeaderInRoom(string leaderName, string room) => new(
+        leaderName,
+        [new(leaderName, null, string.Empty, null, string.Empty, null, null, false, room, IsLeader: true)]);
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_LeaderMovesThroughRooms_AppendsEachNewRoomInOrder()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "2"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "3"));
+
+        Assert.Equal(["1", "2", "3"], GetLeaderRoomTrail());
+    }
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_SameRoomReportedAgain_DoesNotDuplicate()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+
+        Assert.Equal(["1"], GetLeaderRoomTrail());
+    }
+
+    [Fact]
+    public void UpdateLeaderRoomTrail_LeaderChanges_ClearsPreviousTrail()
+    {
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "1"));
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Hero", "2"));
+
+        InvokeUpdateLeaderRoomTrail(GroupWithLeaderInRoom("Companion", "5"));
+
+        Assert.Equal(["5"], GetLeaderRoomTrail());
     }
 
     // ====================================================================
@@ -2608,7 +2975,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         var viewModel = new MainWindowViewModel(
             profileService: new ProfileService(Path.Combine(_tempDir, "PersistProfiles")),
             settingsService: new AppSettingsService(Path.Combine(_tempDir, "PersistSettings")),
-            groupSpellStore: store);
+            groupSpellStore: store, layoutPresetService: new LayoutPresetService(_tempDir));
 
         viewModel.NewGroupSpellLabel = "cc";
         viewModel.NewGroupSpellName = "cure critical";
@@ -3588,6 +3955,17 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         method!.Invoke(_vm, [people]);
     }
 
+    /// <summary>Invokes the private UpdateLeaderRoomTrail method via reflection — directly, not
+    /// through OnGroupChanged's own Dispatcher.UIThread.Post, since this test class doesn't pump
+    /// the Avalonia dispatcher and the method itself has no dispatcher dependency of its own.</summary>
+    private void InvokeUpdateLeaderRoomTrail(CharacterGroupUpdate update)
+    {
+        var method = typeof(MainWindowViewModel).GetMethod("UpdateLeaderRoomTrail",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+        method!.Invoke(_vm, [update]);
+    }
+
     /// <summary>Invokes the private OnGroupChanged method via reflection.</summary>
     private void InvokeOnGroupChanged(CharacterGroupUpdate update)
     {
@@ -4023,7 +4401,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     {
         // Use a separate VM so we can call DisposeAsync without affecting
         // the fixture VM (which is disposed by the test harness after each test).
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
 
         var field = GetTriggerSendLockField();
         var semaphore = (SemaphoreSlim)field.GetValue(isolatedVm)!;
@@ -4157,7 +4535,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     [Fact]
     public async Task TriggerCts_DisposeAsync_CancelsToken()
     {
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
         var field = GetTriggerCtsField();
         var cts = (CancellationTokenSource)field.GetValue(isolatedVm)!;
 
@@ -4171,7 +4549,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     [Fact]
     public async Task TriggerCts_DisposeAsync_DisposesCts()
     {
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
         var field = GetTriggerCtsField();
         var cts = (CancellationTokenSource)field.GetValue(isolatedVm)!;
 
@@ -4201,7 +4579,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     [Fact]
     public async Task DisposeAsync_WithNoTriggerTasks_DoesNotThrow()
     {
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
 
         var exception = await Record.ExceptionAsync(
             () => isolatedVm.DisposeAsync().AsTask());
@@ -4215,7 +4593,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         // Arrange: create an isolated VM, invoke SendTriggeredCommandsAsync
         // with an empty batch, and manually track the returned Task (as
         // OnLineReceived does in production via _triggerTasks.Add(task)).
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
         var sendMethod = GetSendTriggeredCommandsAsyncMethod();
         var tasksField = GetTriggerTasksField();
         var tasks = (List<Task>)tasksField.GetValue(isolatedVm)!;
@@ -4282,7 +4660,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     [Fact]
     public async Task DisposeAsync_SetsAcceptingFlagFalse()
     {
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
         var field = GetAcceptingTriggerTasksField();
 
         Assert.True((bool)field.GetValue(isolatedVm)!);
@@ -4296,7 +4674,7 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
     public async Task OnLineReceived_AfterDisposal_WithMatchingTrigger_DoesNotAddTask()
     {
         // Arrange: isolated VM with a trigger rule registered
-        var isolatedVm = new MainWindowViewModel();
+        var isolatedVm = CreateIsolatedViewModel();
         var onLineReceived = GetOnLineReceivedMethod();
         var tasksField = GetTriggerTasksField();
         var triggersField = GetTriggersField();

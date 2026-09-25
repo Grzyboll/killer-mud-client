@@ -28,6 +28,13 @@
       <Border Classes="mud-section" Padding="10">
         <StackPanel Spacing="10">
           <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoSelfHealEnabled}"
+                      Content="Autoleczenie — lecz się sam poniżej progu, nawet bez uruchomionej farmy" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Ta sama reakcja co w farmie, ale działa niezależnie od niej — rzuca najsilniejsze z „Zaklęć leczących” poniżej, które akurat jest zapamiętane, gdy tylko HP spadnie poniżej progu. Nie memuje ani nie odpoczywa (to wymaga chodzenia po pokojach farmy) — przydatne dla postaci, która tylko podąża za liderem (Autofollow, Automaty → Podróż) i sama nie może się zamemować." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Classes="mud-label" Text="Próg HP" />
               <Border Grid.Column="1" Classes="mud-badge mud-badge-gold">
@@ -40,6 +47,31 @@
                     TickFrequency="5" IsSnapToTickEnabled="True" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                        Text="Farma przerywa chodzenie i zaczyna się leczyć, gdy aktualne HP spadnie do tego procentu maksimum lub niżej." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmHealOrderEnabled}"
+                      Content="Ordery lecznicze — każ drużynie się leczyć, gdy moje HP spadnie poniżej progu" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Ten sam próg HP powyżej: gdy Twoje HP spadnie poniżej niego, klient wyśle poniższe zaklęcia jako „order &lt;członek&gt; cast &quot;&lt;zaklęcie&gt;&quot; self” do każdego innego członka drużyny (raz na spadek HP — nie spamuje, dopóki nie wrócisz powyżej progu). Wymaga bycia liderem drużyny GMCP, tak jak zwykłe „order” — jeśli nie jesteś liderem, użyj zamiast tego „Zdalnego sterowania” w panelu Automaty → Drużyna." />
+            <TextBox MinHeight="64"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jedno zaklęcie na linię, np. cure critical&#x0a;cure serious"
+                     Text="{Binding AutoFarmHealOrderSpellNamesText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Możesz wpisać wiele wierszy lub rozdzielić nazwy separatorem ustawionym w opcjach klienta — każde zaklęcie zostanie zlecone każdemu członkowi drużyny." />
+            <CheckBox IsChecked="{Binding AutoFarmHealOrderMemEnabled}"
+                      Content="Domemuj, gdy trzeba" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Przed każdym „cast” wyśle też „order &lt;członek&gt; mem &quot;&lt;zaklęcie&gt;&quot;”. Klient nie widzi, czy dany członek ma akurat to zaklęcie zapamiętane (GMCP podaje tylko ile mu zostało punktów pamięci, nie które zaklęcia zna), więc zlecenie mema leci za każdym razem — u kogoś, kto już je ma zapamiętane, to nic nie zmienia, a u kogoś, komu się skończyło, zostanie zapamiętane na czas kolejnego spadku HP." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmRestOrderEnabled}"
+                      Content="Ordery odpoczynku — każ drużynie odpoczywać, gdy Ty wchodzisz w kolejny pokój" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Przed każdym wejściem do kolejnego pokoju farmy wyśle „order &lt;członek&gt; rest” do każdego innego członka drużyny, który akurat nie odpoczywa. Pomyślane do wchodzenia w lokacje z agresywnymi mobami atakującymi losowy cel — drużyna zostaje na miejscu, odpoczywając (więc zwykle poza pulą losowych celów), a idziesz i walczysz tylko Ty. Warto połączyć z buforem utrzymywanym stale na sobie (patrz „Bufory utrzymywane na sobie i zaklęcia ofensywne” poniżej — zwykła linia bez „!”) oraz z Autofollow (Automaty → Podróż) po stronie towarzysza, żeby dogonił Cię, gdy skończysz." />
           </StackPanel>
 
           <StackPanel Spacing="3">
@@ -80,14 +112,25 @@
           </StackPanel>
 
           <StackPanel Spacing="3">
-            <TextBlock Classes="mud-label" Text="Zaklęcia rzucane po zaatakowaniu przeciwnika (w tej kolejności)" />
+            <TextBlock Classes="mud-label" Text="Bufory utrzymywane na sobie i zaklęcia ofensywne (w tej kolejności)" />
             <TextBox Text="{Binding AutoFarmCastSpellsText, UpdateSourceTrigger=PropertyChanged}"
                      AcceptsReturn="True"
                      Height="70"
                      TextWrapping="Wrap"
                      PlaceholderText="Jedno zaklęcie na linię, w kolejności rzucania&#x0a;np. armor&#x0a;bless&#x0a;!magic missile" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
-                       Text="Gdy tylko rozpocznie się walka (nie samo wejście do pokoju), farma pomija buffy, które już są aktywne, i rzuca resztę po kolei na siebie. Linia zaczynająca się od „!” to zaklęcie ofensywne — leci w przeciwnika, z którym akurat walczysz, i rzucane jest zawsze (bez sprawdzania aktywnych efektów). Jeśli któregoś brakuje w pamięci, farma zadba o to wcześniej — przy wejściu do pokoju przerywa chodzenie, memuje i odpoczywa, tak samo jak przy zaklęciu leczącym — więc w trakcie walki nic nie musi memować." />
+                       Text="Zwykła linia (bez „!”) to bufor utrzymywany na sobie przez cały czas trwania farmy — sprawdzany przed każdym wejściem do kolejnego pokoju, nie tylko przy starcie walki: jeśli nie jest zapamiętany, farma przerywa chodzenie, memuje i odpoczywa (tak samo jak przy zaklęciu leczącym); jeśli jest zapamiętany, ale akurat wygasł, zostaje od razu rzucony na siebie, zanim farma pójdzie dalej. Linia zaczynająca się od „!” to zaklęcie ofensywne — w odróżnieniu od bufora leci wyłącznie przy starcie walki (dopiero wtedy jest kogo trafić), zawsze w przeciwnika, z którym akurat walczysz, i zawsze rzucane, bez sprawdzania aktywnych efektów." />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <TextBlock Classes="mud-label" Text="Umiejętności uruchamiane po zaatakowaniu przeciwnika (w tej kolejności)" />
+            <TextBox Text="{Binding AutoFarmSkillsText, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     Height="70"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jedna umiejętność na linię, w kolejności użycia&#x0a;np. berserk&#x0a;!kick" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="To samo co zaklęcia powyżej, ale dla umiejętności (np. kopnięcie) zamiast czarów — bez memowania: umiejętność jest gotowa, gdy tylko zejdzie z odnowienia. Gdy tylko rozpocznie się walka i dalej przez cały jej czas (w miarę jak kolejne umiejętności schodzą z odnowienia), farma pomija te już aktywne na sobie i używa reszty po kolei. Linia zaczynająca się od „!” to umiejętność ofensywna — leci w przeciwnika, z którym akurat walczysz, i używana jest zawsze, gdy tylko gotowa; bez „!” to umiejętność użyta na sobie (np. berserk), pomijana, gdy już aktywna." />
           </StackPanel>
         </StackPanel>
       </Border>

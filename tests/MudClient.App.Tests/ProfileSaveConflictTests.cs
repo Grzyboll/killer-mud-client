@@ -32,7 +32,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm1.NewProfileName = "TestHero";
             vm1.NewProfileHost = "killer-mud.pl";
             vm1.NewProfilePort = 4004;
@@ -42,7 +44,9 @@ public sealed class ProfileSaveConflictTests
 
             // "Instance 2": loads and re-saves the same profile, moving the on-disk
             // timestamp past what vm1 last knew about.
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm2.SelectedProfileName = "TestHero";
             vm2.SelectProfileCommand.Execute(null);
 
@@ -76,7 +80,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm = new MainWindowViewModel(profileService, settingsService);
+            await using var vm = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm.NewProfileName = "TestHero";
             vm.NewProfileHost = "killer-mud.pl";
             vm.NewProfilePort = 4004;
@@ -109,7 +115,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm1.NewRuleName = "GlobalOne";
             vm1.NewRuleType = "trigger";
             vm1.NewRulePattern = "x";
@@ -122,7 +130,9 @@ public sealed class ProfileSaveConflictTests
             // "Instance 2": loads the global file at construction (sees GlobalOne), then adds
             // its own global trigger and saves — moving the on-disk timestamp past what vm1
             // last knew about.
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm2.NewRuleName = "GlobalTwo";
             vm2.NewRuleType = "trigger";
             vm2.NewRulePattern = "z";
@@ -167,7 +177,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm1.NewRuleName = "GlobalOne";
             vm1.NewRuleType = "trigger";
             vm1.NewRulePattern = "x";
@@ -185,7 +197,9 @@ public sealed class ProfileSaveConflictTests
             await Task.Delay(20, TestContext.Current.CancellationToken);
 
             // "Instance 2": loads (sees both), deletes GlobalOne, saves.
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             var toDelete = vm2.AutomationRules.First(r => r.Name == "GlobalOne");
             vm2.DeleteRuleCommand.Execute(toDelete);
 
@@ -220,7 +234,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm1.NewRuleName = "GlobalOne";
             vm1.NewRuleType = "trigger";
             vm1.NewRulePattern = "x";
@@ -231,7 +247,9 @@ public sealed class ProfileSaveConflictTests
             await Task.Delay(20, TestContext.Current.CancellationToken);
 
             // "Instance 2": creates a global folder and files a new trigger into it.
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm2.CreateFolderCommand.Execute(FolderKind.Triggers);
             var folder = vm2.Folders.Single(f => f.Kind == FolderKind.Triggers);
             vm2.ToggleFolderGlobalCommand.Execute(folder);
@@ -288,7 +306,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm1.NewRuleName = "MojTrigger";
             vm1.NewRuleType = "trigger";
             vm1.NewRulePattern = "Jestes ranny";
@@ -300,7 +320,9 @@ public sealed class ProfileSaveConflictTests
 
             // "Instance 2": independently creates its own rule that happens to share the same
             // Type+Name as vm1's, but with a different Pattern/Action.
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm2.NewRuleName = "MojTrigger";
             vm2.NewRuleType = "trigger";
             vm2.NewRulePattern = "Jestes zmeczony";
@@ -347,9 +369,13 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm1 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm1 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
-            await using var vm2 = new MainWindowViewModel(profileService, settingsService);
+            await using var vm2 = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm2.CreateFolderCommand.Execute(FolderKind.Triggers);
             var folder = vm2.Folders.Single(f => f.Kind == FolderKind.Triggers);
             vm2.ToggleFolderGlobalCommand.Execute(folder);
@@ -391,7 +417,9 @@ public sealed class ProfileSaveConflictTests
 
         try
         {
-            await using var vm = new MainWindowViewModel(profileService, settingsService);
+            await using var vm = new MainWindowViewModel(profileService, settingsService,
+                layoutPresetService: new LayoutPresetService(directory),
+                groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
             vm.NewProfileName = "TestHero";
             vm.NewProfileHost = "killer-mud.pl";
             vm.NewProfilePort = 4004;

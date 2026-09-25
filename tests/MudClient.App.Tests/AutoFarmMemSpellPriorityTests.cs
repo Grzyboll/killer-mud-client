@@ -28,7 +28,9 @@ public sealed class AutoFarmMemSpellPriorityTests
     public async Task AutoFarmMemSpellsText_RoundTripsRequiredAndOpportunisticLines()
     {
         var directory = CreateDirectory();
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {
@@ -47,7 +49,9 @@ public sealed class AutoFarmMemSpellPriorityTests
     public async Task AutoFarmMemSpellsText_DedupesCaseInsensitively_FirstOccurrenceWins()
     {
         var directory = CreateDirectory();
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {
@@ -67,7 +71,9 @@ public sealed class AutoFarmMemSpellPriorityTests
     public async Task AutoFarmMemSpellsText_TildeWithNoNameLeft_IsIgnored()
     {
         var directory = CreateDirectory();
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {
@@ -92,7 +98,9 @@ public sealed class AutoFarmMemSpellPriorityTests
             Name = "Legacy",
             AutoFarmRequiredMemorizedSpells = ["armor", "bless"],
         });
-        var viewModel = new MainWindowViewModel(service, new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(service, new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {
@@ -119,7 +127,9 @@ public sealed class AutoFarmMemSpellPriorityTests
             AutoFarmRequiredMemorizedSpells = ["old-legacy-entry"],
             AutoFarmMemSpells = [new AutoFarmMemSpell("armor", Required: true), new AutoFarmMemSpell("haste", Required: false)],
         });
-        var viewModel = new MainWindowViewModel(service, new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(service, new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
 
         try
         {

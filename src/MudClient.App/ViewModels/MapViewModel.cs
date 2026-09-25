@@ -98,6 +98,12 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private IReadOnlyList<RoomMapMarker> _roomMarkers = [];
     private readonly MapMarkerStore? _markerStore;
     private readonly Dictionary<string, MapMarker> _markersByVnum = new(StringComparer.Ordinal);
+    /// <summary>Holds a marker cut via <see cref="CutMarkerOnSelectedRoomCommand"/> until it's
+    /// dropped onto another room with <see cref="PasteMarkerOnSelectedRoomCommand"/> — lets a
+    /// misplaced marker (symbol and note both) move to the correct room without retyping the note.
+    /// Stays put after a paste (not consumed) so the same fix can be pasted onto more than one room
+    /// if needed; only replaced by cutting something else.</summary>
+    private MapMarker? _cutMarker;
     private readonly SharedMapMarkerStore _sharedMarkerStore = new();
     private readonly IReadOnlyList<MapMarker> _sharedMarkerCatalog;
     private readonly IReadOnlyList<TeacherEntry> _teacherCatalog;
@@ -127,6 +133,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private readonly RelayCommand _lordGotoSelectedRoomCommand;
     private readonly RelayCommand<string> _setMarkerOnSelectedRoomCommand;
     private readonly RelayCommand _removeMarkerFromSelectedRoomCommand;
+    private readonly RelayCommand _cutMarkerFromSelectedRoomCommand;
+    private readonly RelayCommand _pasteMarkerOnSelectedRoomCommand;
     private readonly RelayCommand _reportMarkersCommand;
     private readonly RelayCommand _findNearestRentCommand;
     private readonly RelayCommand _startMapEditorCommand;
@@ -143,6 +151,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     private RoomExitInfo? _eastExit;
     private RoomExitInfo? _upExit;
     private RoomExitInfo? _downExit;
+    private readonly RelayCommand<FarmRegionSummary> _removeAutoFarmRegionCommand;
     private MapEditorSession? _mapEditor;
 
     public MapViewModel(
@@ -219,6 +228,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             CanLordGotoSelectedRoom);
         _setMarkerOnSelectedRoomCommand = new RelayCommand<string>(SetMarkerOnSelectedRoom, _ => CanEditSelectedRoomMarker);
         _removeMarkerFromSelectedRoomCommand = new RelayCommand(RemoveMarkerFromSelectedRoom, () => SelectedRoomHasMarker);
+        _cutMarkerFromSelectedRoomCommand = new RelayCommand(CutMarkerOnSelectedRoom, () => SelectedRoomHasMarker);
+        _pasteMarkerOnSelectedRoomCommand = new RelayCommand(PasteMarkerOnSelectedRoom, () => CanEditSelectedRoomMarker && HasCutMarker);
         _reportMarkersCommand = new RelayCommand(ReportMarkers, () => _markersByVnum.Count > 0);
         _findNearestRentCommand = new RelayCommand(
             FindNearestRent,
@@ -237,6 +248,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
                 MainViewModel?.SendMapMovementCommand(direction);
             }
         });
+        _removeAutoFarmRegionCommand = new RelayCommand<FarmRegionSummary>(RemoveAutoFarmRegion);
     }
 
     public event Action? CenterOnCurrentRoomRequested;
@@ -282,6 +294,10 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     public IRelayCommand<string> SetMarkerOnSelectedRoomCommand => _setMarkerOnSelectedRoomCommand;
 
     public IRelayCommand RemoveMarkerFromSelectedRoomCommand => _removeMarkerFromSelectedRoomCommand;
+
+    public IRelayCommand CutMarkerFromSelectedRoomCommand => _cutMarkerFromSelectedRoomCommand;
+
+    public IRelayCommand PasteMarkerOnSelectedRoomCommand => _pasteMarkerOnSelectedRoomCommand;
 
     public IRelayCommand ReportMarkersCommand => _reportMarkersCommand;
 
@@ -423,6 +439,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             OnPropertyChanged(nameof(HasMovementExits));
         }
     }
+    public IRelayCommand<FarmRegionSummary> RemoveAutoFarmRegionCommand => _removeAutoFarmRegionCommand;
 
     public string NewMapAreaName
     {
@@ -458,6 +475,11 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
                 RefreshSpellMobMarkers();
                 RefreshSearchEntries();
                 RefreshRoomMarkers();
+                // Per-region room counts in AutoFarmRegionStatusText/AutoFarmRegionSummaries
+                // depend on the map being loaded — refresh them too, in case regions were
+                // already restored (profile load) before the map finished loading.
+                OnPropertyChanged(nameof(AutoFarmRegionStatusText));
+                OnPropertyChanged(nameof(AutoFarmRegionSummaries));
             }
         }
     }
@@ -586,6 +608,8 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
                 _lordGotoSelectedRoomCommand.NotifyCanExecuteChanged();
                 _setMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
                 _removeMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+                _cutMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+                _pasteMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -705,6 +729,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
             if (SetProperty(ref _autoFarmRegions, value))
             {
                 OnPropertyChanged(nameof(AutoFarmRegionStatusText));
+                OnPropertyChanged(nameof(AutoFarmRegionSummaries));
                 _clearAutoFarmRegionCommand.NotifyCanExecuteChanged();
                 AutoFarmRegionsChanged?.Invoke(value);
             }
@@ -766,6 +791,20 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         }
     }
 
+    /// <summary>One row per <see cref="AutoFarmRegions"/> entry, numbered and with its own room
+    /// count, for a per-region "usuń" list — <see cref="AutoFarmRegionStatusText"/> only ever
+    /// aggregates, so a list of several regions couldn't otherwise be told apart to remove just
+    /// one.</summary>
+    public IReadOnlyList<FarmRegionSummary> AutoFarmRegionSummaries => AutoFarmRegions
+        .Select((region, index) =>
+        {
+            var count = MapIndex is null ? 0 : FarmTraversalPlanner.CountTotal(MapIndex, [region], AutoFarmExcludedRoomIds);
+            return new FarmRegionSummary(
+                region,
+                $"{index + 1}. obszar {region.AreaId}, poziom {region.Z:0.##} — {count} pokoi");
+        })
+        .ToArray();
+
     /// <summary>Called by MapPanelView's code-behind when a right-drag on the map finishes while
     /// <see cref="IsDefiningAutoFarmRegion"/> was on — adds it alongside any regions already
     /// drawn instead of replacing them, so a run can cover several separate areas of the map.</summary>
@@ -779,6 +818,26 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
     {
         IsDefiningAutoFarmRegion = false;
         AutoFarmRegions = [];
+    }
+
+    /// <summary>Removes just the one region behind <paramref name="summary"/> — bound to each row's
+    /// own "usuń" button (see <see cref="AutoFarmRegionSummaries"/>), unlike
+    /// <see cref="ClearAutoFarmRegion"/> which wipes all of them. <see cref="FarmRegion"/> is a
+    /// value type with no id of its own, so this removes by value (the first structural match) —
+    /// harmless even for two identically-drawn regions, since either is indistinguishable from the
+    /// other and removing "a" match leaves the same net set of covered rooms either way.</summary>
+    public void RemoveAutoFarmRegion(FarmRegionSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        var regions = _autoFarmRegions.ToList();
+        if (regions.Remove(summary.Region))
+        {
+            AutoFarmRegions = regions;
+        }
     }
 
     /// <summary>Bulk-replaces every region at once — used only when reloading from the active
@@ -1229,19 +1288,39 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         OnMarkersChanged();
     }
 
-    /// <summary>Auto-applies the "X" (Zamknięte) marker to <paramref name="vnum"/> after autowalk
-    /// gives up trying to get through a door there (see <see cref="MainWindowViewModel"/>'s autowalk
-    /// stuck-step recovery) — the same exclusion a player would set by hand, so the room drops out
-    /// of future auto-farm routing via <see cref="AutoFarmExcludedRoomIds"/> without needing any
-    /// separate exclusion mechanism. Never overwrites a marker the player already placed there.</summary>
-    public void MarkRoomClosed(string? vnum)
+    /// <summary>Whether <see cref="CutMarkerFromSelectedRoomCommand"/> has something waiting to be
+    /// dropped onto another room via <see cref="PasteMarkerOnSelectedRoomCommand"/>.</summary>
+    public bool HasCutMarker => _cutMarker is not null;
+
+    /// <summary>Removes the selected room's marker (symbol and note both) and holds onto it so
+    /// <see cref="PasteMarkerOnSelectedRoomCommand"/> can drop it onto the correct room instead —
+    /// for fixing a marker placed on the wrong room without retyping its note. See
+    /// <see cref="_cutMarker"/>'s own doc comment for why a paste doesn't consume it.</summary>
+    private void CutMarkerOnSelectedRoom()
     {
-        if (string.IsNullOrWhiteSpace(vnum) || _markersByVnum.ContainsKey(vnum))
+        if (SelectedRoom?.Vnum is not { } vnum || !_markersByVnum.TryGetValue(vnum, out var marker))
         {
             return;
         }
 
-        _markersByVnum[vnum] = new MapMarker(vnum, "X");
+        _cutMarker = marker;
+        _markersByVnum.Remove(vnum);
+        OnPropertyChanged(nameof(HasCutMarker));
+        _pasteMarkerOnSelectedRoomCommand.NotifyCanExecuteChanged();
+        OnMarkersChanged();
+    }
+
+    /// <summary>Drops the marker held by <see cref="CutMarkerFromSelectedRoomCommand"/> onto the
+    /// selected room, replacing whatever marker (and note) is already there. Does not clear
+    /// <see cref="_cutMarker"/> — see its own doc comment.</summary>
+    private void PasteMarkerOnSelectedRoom()
+    {
+        if (_cutMarker is not { } cut || SelectedRoom?.Vnum is not { } vnum || string.IsNullOrWhiteSpace(vnum))
+        {
+            return;
+        }
+
+        _markersByVnum[vnum] = cut with { Vnum = vnum };
         OnMarkersChanged();
     }
 
@@ -1251,6 +1330,7 @@ public sealed class MapViewModel : ObservableObject, IDisposable, IAsyncDisposab
         OnPropertyChanged(nameof(SelectedRoomHasMarker));
         OnPropertyChanged(nameof(SelectedRoomNote));
         _removeMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
+        _cutMarkerFromSelectedRoomCommand.NotifyCanExecuteChanged();
         _reportMarkersCommand.NotifyCanExecuteChanged();
         _findNearestRentCommand.NotifyCanExecuteChanged();
 

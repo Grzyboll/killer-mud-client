@@ -55,7 +55,9 @@ public sealed class AutowalkStandOrderDelayTests
         var directory = Path.Combine(
             Path.GetTempPath(), "KillerMudClient_StandOrderDelayTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
         var output = new List<string>();
         viewModel.OutputReceived += text => output.Add(text);
 
@@ -84,7 +86,9 @@ public sealed class AutowalkStandOrderDelayTests
         var directory = Path.Combine(
             Path.GetTempPath(), "KillerMudClient_StandOrderDelayTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+        var viewModel = new MainWindowViewModel(new ProfileService(directory), new AppSettingsService(directory),
+            layoutPresetService: new LayoutPresetService(directory),
+            groupSpellStore: new GroupSpellStore(Path.Combine(directory, "group-spells.json")));
         var output = new List<string>();
         viewModel.OutputReceived += text => output.Add(text);
 

@@ -114,6 +114,16 @@
               <MenuItem Header="Usuń znacznik"
                         Command="{Binding RemoveMarkerFromSelectedRoomCommand}"
                         IsVisible="{Binding SelectedRoomHasMarker}" />
+              <!-- Move a misplaced marker (symbol + note both) to the correct room without
+                   retyping the note: "Wytnij" removes it from here and holds it, "Wklej" drops it
+                   onto whichever room is selected next. Unlike Usuń, Wytnij doesn't discard the
+                   marker — see MapViewModel._cutMarker's own doc comment. -->
+              <MenuItem Header="Wytnij znacznik"
+                        Command="{Binding CutMarkerFromSelectedRoomCommand}"
+                        IsVisible="{Binding SelectedRoomHasMarker}" />
+              <MenuItem Header="Wklej znacznik"
+                        Command="{Binding PasteMarkerOnSelectedRoomCommand}"
+                        IsVisible="{Binding HasCutMarker}" />
               <!-- Finds the closest local "R" marker to the player's current room and focuses it
                    the same way "Szukaj pokój" does — double-click on the now-visible room still
                    walks there via the map's existing double-click handling. -->
@@ -250,6 +260,24 @@
                         Margin="0,4" />
                 <TextBlock Classes="mud-heading" Text="Obszary farmy" />
                 <TextBlock Classes="mud-faint" TextWrapping="Wrap" Text="{Binding AutoFarmRegionStatusText}" />
+                <ItemsControl ItemsSource="{Binding AutoFarmRegionSummaries}"
+                              IsVisible="{Binding AutoFarmRegionSummaries.Count}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:FarmRegionSummary">
+                      <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                        <TextBlock Grid.Column="0" Classes="mud-faint"
+                                   Text="{Binding Description}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                        <Button Grid.Column="1" Content="✕" Classes="mud-small"
+                                Padding="6,1"
+                                ToolTip.Tip="Usuń ten obszar"
+                                Command="{Binding $parent[ItemsControl].((vm:MapViewModel)DataContext).RemoveAutoFarmRegionCommand}"
+                                CommandParameter="{Binding}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 <ToggleSwitch Content="Zaznacz obszar (prawy przycisk + przeciągnięcie)"
                               IsChecked="{Binding IsDefiningAutoFarmRegion}"
                               ToolTip.Tip="Po włączeniu przeciągnij prawym przyciskiem myszy po mapie, aby dodać kolejny prostokątny obszar, po którym farma może się poruszać — można dodać ich kilka, także na różnych obszarach/poziomach mapy." />

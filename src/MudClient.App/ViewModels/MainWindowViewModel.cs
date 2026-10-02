@@ -74,6 +74,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// farm's threshold — cleared once HP recovers above it (or the farm stops), so a later dip
     /// orders the group again.</summary>
     private bool _autoFarmHealOrderSent;
+    /// <summary>Debounces <see cref="TryAutoFarmSustenance"/> to once per hunger/thirst onset —
+    /// cleared once Char.Condition reports neither flag anymore, so the next onset reacts again.</summary>
+    private bool _autoFarmSustenanceActed;
+    /// <summary>How long <see cref="TryAutoFarmPrayer"/> keeps auto-farm paused after sending
+    /// "pray" before resuming on its own — a field (not a const) so tests can shrink it instead of
+    /// waiting out the real default.</summary>
+    private int _autoFarmPrayerPauseMilliseconds = 3000;
+    /// <summary>Cancelled by a fresh <see cref="TryAutoFarmPrayer"/> trigger or by
+    /// <see cref="StopAutoFarm"/>, so a stale delayed resume can't un-pause a farm that was stopped
+    /// or paused again for an unrelated reason in the meantime.</summary>
+    private CancellationTokenSource? _autoFarmPrayerPauseCts;
     private readonly AutoAssistPolicy _autoAssist = new();
     private readonly GroupExhaustionRefreshPolicy _groupExhaustionRefresh = new();
     private readonly ProfileService _profiles;
@@ -2599,6 +2610,94 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmSustenanceEnabled"/>.</summary>
+    public bool AutoFarmSustenanceEnabled
+    {
+        get => _profileSettings.AutoFarmSustenanceEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmSustenanceEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmSustenanceEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmSustenanceSpellNamesText"/>.</summary>
+    public string AutoFarmSustenanceSpellNamesText
+    {
+        get => _profileSettings.AutoFarmSustenanceSpellNamesText;
+        set
+        {
+            var names = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoFarmSustenanceSpellNamesText, names, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmSustenanceSpellNamesText = names;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmSustenanceCommandsText"/>.</summary>
+    public string AutoFarmSustenanceCommandsText
+    {
+        get => _profileSettings.AutoFarmSustenanceCommandsText;
+        set
+        {
+            var commands = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoFarmSustenanceCommandsText, commands, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmSustenanceCommandsText = commands;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmPrayerEnabled"/>.</summary>
+    public bool AutoFarmPrayerEnabled
+    {
+        get => _profileSettings.AutoFarmPrayerEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmPrayerEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmPrayerEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmPrayerSkillName"/>.</summary>
+    public string AutoFarmPrayerSkillName
+    {
+        get => _profileSettings.AutoFarmPrayerSkillName;
+        set
+        {
+            var name = value ?? string.Empty;
+            if (string.Equals(_profileSettings.AutoFarmPrayerSkillName, name, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmPrayerSkillName = name;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public bool AutoStandOnLyingEnabled
     {
         get => _profileSettings.AutoStandOnLyingEnabled;
@@ -3052,6 +3151,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoFarmHealOrderMemEnabled));
         OnPropertyChanged(nameof(AutoSelfHealEnabled));
         OnPropertyChanged(nameof(AutoFarmRestOrderEnabled));
+        OnPropertyChanged(nameof(AutoFarmSustenanceEnabled));
+        OnPropertyChanged(nameof(AutoFarmSustenanceSpellNamesText));
+        OnPropertyChanged(nameof(AutoFarmSustenanceCommandsText));
+        OnPropertyChanged(nameof(AutoFarmPrayerEnabled));
+        OnPropertyChanged(nameof(AutoFarmPrayerSkillName));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
@@ -5630,6 +5734,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         // _autoFarmSessionExcludedRoomIds' own doc comment for why this must NOT persist.
         _autoFarmSessionExcludedRoomIds = [];
         _autoFarmHealOrderSent = false;
+        _autoFarmPrayerPauseCts?.Cancel();
 
         if (_autowalkPath is not null)
         {
@@ -7228,6 +7333,133 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 && !AutowalkRecoveryPolicy.IsRestingPosition(member.Position))
             .Select(member => $"order {member.Name} rest")
             .ToArray();
+    }
+
+    /// <summary>Reacts to Char.Condition reporting "hungry" or "thirsty" — see
+    /// <see cref="AutoFarmSustenanceEnabled"/>'s own xmldoc. Debounced via
+    /// <see cref="_autoFarmSustenanceActed"/> to once per onset, the same shape as
+    /// <see cref="TryAutoFarmHealOrderGroup"/>'s HP-threshold debounce.</summary>
+    private void TryAutoFarmSustenance(IReadOnlyDictionary<string, bool> conditionFlags)
+    {
+        if (!IsConnected)
+        {
+            return;
+        }
+
+        var isHungryOrThirsty = (conditionFlags.TryGetValue("hungry", out var hungry) && hungry)
+            || (conditionFlags.TryGetValue("thirsty", out var thirsty) && thirsty);
+        if (!isHungryOrThirsty)
+        {
+            _autoFarmSustenanceActed = false;
+            return;
+        }
+
+        if (_autoFarmSustenanceActed)
+        {
+            return;
+        }
+
+        var spellNames = CommandStacker.Split(AutoFarmSustenanceSpellNamesText, CommandStackingSeparator);
+        var extraCommands = CommandStacker.Split(AutoFarmSustenanceCommandsText, CommandStackingSeparator);
+        var commands = BuildAutoFarmSustenanceCommands(
+            AutoFarmSustenanceEnabled, spellNames, _latestMemorizedSpells, extraCommands);
+        if (commands.Count == 0)
+        {
+            return;
+        }
+
+        _autoFarmSustenanceActed = true;
+        QueueTriggeredCommands(commands);
+    }
+
+    /// <summary>Pure decision behind <see cref="TryAutoFarmSustenance"/>: the same mem-or-cast
+    /// pick <see cref="HealthRecoveryPolicy.GetRecoveryAction"/> already makes for the HP heal
+    /// spell list (cast the strongest already-memorized entry from <paramref name="spellNames"/>,
+    /// or memorize the strongest one if none are), followed by <paramref name="extraCommands"/>
+    /// verbatim — e.g. "cast \"goodberry\" self" then "eat jag" a few times. Empty unless
+    /// <paramref name="enabled"/>.</summary>
+    internal static IReadOnlyList<string> BuildAutoFarmSustenanceCommands(
+        bool enabled,
+        IReadOnlyList<string> spellNames,
+        IReadOnlyList<MemorizedSpell> memorizedSpells,
+        IReadOnlyList<string> extraCommands)
+    {
+        if (!enabled)
+        {
+            return [];
+        }
+
+        var commands = new List<string>();
+        if (spellNames.Count > 0)
+        {
+            var decision = HealthRecoveryPolicy.GetRecoveryAction(spellNames, memorizedSpells);
+            if (decision.Action == HealthRecoveryAction.CastHeal && decision.SpellName is { } castName)
+            {
+                commands.Add($"cast \"{castName}\" self");
+            }
+            else if (decision.Action == HealthRecoveryAction.MemorizeHeal && decision.SpellName is { } memName)
+            {
+                commands.Add($"mem \"{memName}\"");
+            }
+        }
+
+        commands.AddRange(extraCommands.Where(command => !string.IsNullOrWhiteSpace(command)));
+        return commands;
+    }
+
+    /// <summary>Sends "pray" and briefly pauses auto-farm the moment <see cref="SetSkillOnCooldown"/>
+    /// reports <paramref name="readySkillName"/> coming off cooldown — see
+    /// <see cref="AutoFarmPrayerEnabled"/>'s own xmldoc for why this (not a GMCP condition flag)
+    /// is the trigger. The pause only applies while auto-farm is actually running and not already
+    /// paused for another reason; "pray" itself is still sent either way.</summary>
+    private void TryAutoFarmPrayer(string readySkillName)
+    {
+        if (!IsConnected ||
+            !ShouldTriggerAutoFarmPrayer(AutoFarmPrayerEnabled, AutoFarmPrayerSkillName, readySkillName))
+        {
+            return;
+        }
+
+        QueueTriggeredCommands(["pray"]);
+
+        if (!_autoFarmActive || _autoFarmPaused)
+        {
+            return;
+        }
+
+        PauseAutoFarm();
+        _autoFarmPrayerPauseCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _autoFarmPrayerPauseCts = cts;
+        _ = ResumeAutoFarmAfterPrayerAsync(cts.Token);
+    }
+
+    /// <summary>Pure decision behind <see cref="TryAutoFarmPrayer"/>: whether the skill that just
+    /// came off cooldown is the one configured to trigger prayer.</summary>
+    internal static bool ShouldTriggerAutoFarmPrayer(
+        bool enabled, string configuredSkillName, string readySkillName) =>
+        enabled
+        && !string.IsNullOrWhiteSpace(configuredSkillName)
+        && string.Equals(configuredSkillName.Trim(), readySkillName.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Resumes auto-farm (see <see cref="PauseAutoFarm"/>/<see cref="ResumeAutoFarm"/>)
+    /// <see cref="_autoFarmPrayerPauseMilliseconds"/> after <see cref="TryAutoFarmPrayer"/> paused
+    /// it, giving the prayer time to finish before the farm's own walking/combat reactions can
+    /// interrupt it. <see cref="ResumeAutoFarm"/> itself is a no-op if the farm was stopped or
+    /// already resumed in the meantime, so cancellation here is just hygiene, not a correctness
+    /// requirement.</summary>
+    private async Task ResumeAutoFarmAfterPrayerAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(_autoFarmPrayerPauseMilliseconds), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(ResumeAutoFarm);
     }
 
     /// <summary>Orders every NPC in the current group (a summoned/charmed pet) to assist as soon
@@ -11647,6 +11879,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         else if (index >= 0)
         {
             SkillsOnCooldown.RemoveAt(index);
+            TryAutoFarmPrayer(skillName);
         }
     }
 
@@ -11658,6 +11891,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         TryAutoAssist();
+        TryAutoFarmSustenance(update.Flags);
 
         Dispatcher.UIThread.Post(() =>
         {

@@ -164,6 +164,32 @@ public sealed class ProfileAutomationSettings
     /// while this character is the group's GMCP leader.</summary>
     public bool AutoFarmRestOrderEnabled { get; set; }
 
+    /// <summary>Reacts to Char.Condition reporting "hungry" or "thirsty": casts the strongest
+    /// already-memorized entry from <see cref="AutoFarmSustenanceSpellNamesText"/> (or memorizes
+    /// the strongest one if none are), then sends <see cref="AutoFarmSustenanceCommandsText"/>
+    /// verbatim — e.g. "cast \"goodberry\" self" followed by "eat jag" a few times. Works
+    /// standalone, same reasoning as <see cref="AutoSelfHealEnabled"/>: no auto-farm run required.</summary>
+    public bool AutoFarmSustenanceEnabled { get; set; }
+
+    /// <summary>Spell names for <see cref="AutoFarmSustenanceEnabled"/>, strongest/most preferred
+    /// first — same priority-list shape as <c>AutoFarmHealSpellNamesText</c>. One name per line.</summary>
+    public string AutoFarmSustenanceSpellNamesText { get; set; } = string.Empty;
+
+    /// <summary>Extra commands sent every time <see cref="AutoFarmSustenanceEnabled"/> fires,
+    /// after the spell decision above — e.g. "eat jag" repeated a few times. One command per
+    /// line, sent verbatim and in order.</summary>
+    public string AutoFarmSustenanceCommandsText { get; set; } = string.Empty;
+
+    /// <summary>Sends "pray" and briefly pauses auto-farm the moment
+    /// <see cref="AutoFarmPrayerSkillName"/> comes off cooldown (Char.Skills.Timeout) — this MUD
+    /// has no GMCP condition flag for "faith needs renewing"; the only signal is the skill's own
+    /// cooldown clearing, the same way it would for "smite evil" or "lay on hands".</summary>
+    public bool AutoFarmPrayerEnabled { get; set; }
+
+    /// <summary>The skill name whose cooldown-clear triggers <see cref="AutoFarmPrayerEnabled"/> —
+    /// configurable since not every class's prayer skill is named identically.</summary>
+    public string AutoFarmPrayerSkillName { get; set; } = "holy prayer";
+
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>
     public bool AutoStandOnLyingEnabled { get; set; }

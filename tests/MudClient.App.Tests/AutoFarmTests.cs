@@ -1518,6 +1518,43 @@ public sealed class AutoFarmTests
     }
 
     [AvaloniaFact]
+    public async Task Sustenance_SpellMemorizedAfterHungerStarted_CastsOnceReady()
+    {
+        // Regression: a mem sent when the spell wasn't ready used to lock the whole onset, so the
+        // cast never followed once it was memorized. The cast must still fire after mem completes,
+        // and the eat command must not repeat.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceSpellNamesText = "goodberry";
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "OnCharacterConditionChanged", HungryCondition());
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains(output, line => line.Contains("mem \"goodberry\""));
+
+            InvokePrivate(viewModel, "OnMemSpellsChanged", new List<MemorizedSpell>
+            {
+                new(1, 1, "goodberry", Memed: true, Meming: false),
+            });
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("cast \"goodberry\" self"));
+            Assert.Single(output, line => line.Contains("eat jag"));
+            Assert.Single(output, line => line.Contains("mem \"goodberry\""));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task OnCharacterConditionChanged_Hungry_TriggersSustenance()
     {
         // Confirms the real GMCP wiring (not just TryAutoFarmSustenance called directly).

@@ -76,7 +76,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _autoFarmHealOrderSent;
     /// <summary>Debounces <see cref="TryAutoFarmSustenance"/> to once per hunger/thirst onset —
     /// cleared once Char.Condition reports neither flag anymore, so the next onset reacts again.</summary>
-    private bool _autoFarmSustenanceActed;
+    private bool _autoFarmSustenanceCastSent;
+    private bool _autoFarmSustenanceMemSent;
+    private bool _autoFarmSustenanceEatSent;
+    private IReadOnlyDictionary<string, bool> _latestConditionFlags = new Dictionary<string, bool>();
     /// <summary>How long <see cref="TryAutoFarmPrayer"/> keeps auto-farm paused after sending
     /// "pray" before resuming on its own — a field (not a const) so tests can shrink it instead of
     /// waiting out the real default.</summary>
@@ -7391,10 +7394,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             .ToArray();
     }
 
-    /// <summary>Reacts to Char.Condition reporting "hungry" or "thirsty" — see
-    /// <see cref="AutoFarmSustenanceEnabled"/>'s own xmldoc. Debounced via
-    /// <see cref="_autoFarmSustenanceActed"/> to once per onset, the same shape as
-    /// <see cref="TryAutoFarmHealOrderGroup"/>'s HP-threshold debounce.</summary>
+    /// <summary>Reacts to Char.Condition "hungry"/"thirsty" and to Char.MemSpell updates (so a spell
+    /// that was still being memorized when hunger began gets cast once it's ready). Each step —
+    /// the spell cast, the mem order, the eat/drink commands — fires at most once per hunger/thirst
+    /// onset, and they're tracked separately so a "mem" that went out first doesn't block the cast
+    /// that should follow it.</summary>
     private void TryAutoFarmSustenance(IReadOnlyDictionary<string, bool> conditionFlags)
     {
         if (!IsConnected)
@@ -7406,25 +7410,48 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             || (conditionFlags.TryGetValue("thirsty", out var thirsty) && thirsty);
         if (!isHungryOrThirsty)
         {
-            _autoFarmSustenanceActed = false;
+            _autoFarmSustenanceCastSent = false;
+            _autoFarmSustenanceMemSent = false;
+            _autoFarmSustenanceEatSent = false;
             return;
         }
 
-        if (_autoFarmSustenanceActed)
+        if (_autoFarmSustenanceCastSent && _autoFarmSustenanceEatSent)
         {
             return;
         }
 
-        var spellNames = CommandStacker.Split(AutoFarmSustenanceSpellNamesText, CommandStackingSeparator);
-        var extraCommands = CommandStacker.Split(AutoFarmSustenanceCommandsText, CommandStackingSeparator);
+        var spellNames = _autoFarmSustenanceCastSent
+            ? []
+            : CommandStacker.Split(AutoFarmSustenanceSpellNamesText, CommandStackingSeparator);
+        var extraCommands = _autoFarmSustenanceEatSent
+            ? []
+            : CommandStacker.Split(AutoFarmSustenanceCommandsText, CommandStackingSeparator);
         var commands = BuildAutoFarmSustenanceCommands(
-            AutoFarmSustenanceEnabled, spellNames, _latestMemorizedSpells, extraCommands);
+            AutoFarmSustenanceEnabled, spellNames, _latestMemorizedSpells, extraCommands,
+            allowMem: !_autoFarmSustenanceMemSent);
         if (commands.Count == 0)
         {
             return;
         }
 
-        _autoFarmSustenanceActed = true;
+        foreach (var command in commands)
+        {
+            if (command.StartsWith("cast ", StringComparison.Ordinal))
+            {
+                _autoFarmSustenanceCastSent = true;
+            }
+            else if (command.StartsWith("mem ", StringComparison.Ordinal))
+            {
+                _autoFarmSustenanceMemSent = true;
+            }
+        }
+
+        if (extraCommands.Count > 0)
+        {
+            _autoFarmSustenanceEatSent = true;
+        }
+
         QueueTriggeredCommands(commands);
     }
 
@@ -7433,12 +7460,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// spell list (cast the strongest already-memorized entry from <paramref name="spellNames"/>,
     /// or memorize the strongest one if none are), followed by <paramref name="extraCommands"/>
     /// verbatim — e.g. "cast \"goodberry\" self" then "eat jag" a few times. Empty unless
-    /// <paramref name="enabled"/>.</summary>
+    /// <paramref name="enabled"/>. <paramref name="allowMem"/> is false once a mem order already
+    /// went out for this onset, so the same memorize isn't re-sent on every Char.MemSpell update.</summary>
     internal static IReadOnlyList<string> BuildAutoFarmSustenanceCommands(
         bool enabled,
         IReadOnlyList<string> spellNames,
         IReadOnlyList<MemorizedSpell> memorizedSpells,
-        IReadOnlyList<string> extraCommands)
+        IReadOnlyList<string> extraCommands,
+        bool allowMem = true)
     {
         if (!enabled)
         {
@@ -7453,7 +7482,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             {
                 commands.Add($"cast \"{castName}\" self");
             }
-            else if (decision.Action == HealthRecoveryAction.MemorizeHeal && decision.SpellName is { } memName)
+            else if (allowMem && decision.Action == HealthRecoveryAction.MemorizeHeal
+                     && decision.SpellName is { } memName)
             {
                 commands.Add($"mem \"{memName}\"");
             }
@@ -11947,6 +11977,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         TryAutoAssist();
+        _latestConditionFlags = update.Flags;
         TryAutoFarmSustenance(update.Flags);
 
         Dispatcher.UIThread.Post(() =>
@@ -12399,6 +12430,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void OnMemSpellsChanged(IReadOnlyList<MemorizedSpell> spells)
     {
         _latestMemorizedSpells = spells.ToArray();
+        TryAutoFarmSustenance(_latestConditionFlags);
 
         Dispatcher.UIThread.Post(() =>
         {

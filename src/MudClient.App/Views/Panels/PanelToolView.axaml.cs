@@ -39,7 +39,6 @@ public partial class PanelToolView : UserControl
     {
         var host = this.FindControl<ContentControl>("Host")!;
         var settingsButton = this.FindControl<Button>("SettingsButton")!;
-        var effectsSettingsButton = this.FindControl<Button>("EffectsSettingsButton")!;
         var memSettingsButton = this.FindControl<Button>("MemSettingsButton")!;
         var groupSettingsButton = this.FindControl<Button>("GroupSettingsButton")!;
         var chatSettingsButton = this.FindControl<Button>("ChatSettingsButton")!;
@@ -50,7 +49,6 @@ public partial class PanelToolView : UserControl
             _builtViewType = null;
             host.Content = null;
             settingsButton.IsVisible = false;
-            effectsSettingsButton.IsVisible = false;
             memSettingsButton.IsVisible = false;
             groupSettingsButton.IsVisible = false;
             chatSettingsButton.IsVisible = false;
@@ -64,19 +62,16 @@ public partial class PanelToolView : UserControl
         // own title bar instead (see TerminalOverlayCard.axaml) — these would otherwise duplicate it.
         var isOverlaid = this.FindAncestorOfType<TerminalOverlayCard>() is not null;
 
-        // Terminal has no per-panel settings; Map, Effects, Mem, Group, and Chat show their own
-        // real settings button (here, or Effects'/Mem's/Group's/Chat's below) instead of this
-        // inert placeholder.
+        // Terminal has no per-panel settings; Map, Mem, Group, and Chat show their own real
+        // settings button (here, or Mem's/Group's/Chat's below) instead of this inert placeholder.
         settingsButton.IsVisible =
             !string.Equals(tool.Id, "Terminal", StringComparison.Ordinal)
             && !string.Equals(tool.Id, "Map", StringComparison.Ordinal)
-            && !tool.IsEffectsTool
             && !tool.IsMemTool
             && !tool.IsGroupTool
             && !tool.IsChatTool
             && !isOverlaid;
 
-        effectsSettingsButton.IsVisible = tool.IsEffectsTool && !isOverlaid;
         memSettingsButton.IsVisible = tool.IsMemTool && !isOverlaid;
         groupSettingsButton.IsVisible = tool.IsGroupTool && !isOverlaid;
         chatSettingsButton.IsVisible = tool.IsChatTool && !isOverlaid;

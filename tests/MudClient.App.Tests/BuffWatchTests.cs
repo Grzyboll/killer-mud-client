@@ -245,4 +245,94 @@ public sealed class BuffWatchTests : IDisposable
 
         Assert.True(Assert.Single(viewModel.RequiredBuffs).IsMemorized);
     }
+
+    // ====================================================================
+    // Merged Mem/Buffy/Kondycja panel: ending state, unwatched effects, reorder, "Pokaż mem"
+    // ====================================================================
+
+    private static void RaiseAffectsChanged(MainWindowViewModel viewModel, params CharacterAffect[] affects) =>
+        typeof(MainWindowViewModel)
+            .GetMethod("OnCharacterAffectsChanged", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(viewModel, [affects]);
+
+    [AvaloniaFact]
+    public async Task OnCharacterAffectsChanged_WatchedBuffAboutToEnd_CarriesEndingDurationAndDescription()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "mirror image";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseAffectsChanged(viewModel, new CharacterAffect(
+            "mirror image (2)", "Jesteś ukryty pośród swoich odbić.", Negative: false, Ending: true, ExtraValue: "2"));
+        Dispatcher.UIThread.RunJobs();
+
+        var buff = Assert.Single(viewModel.RequiredBuffs);
+        Assert.True(buff.IsActive);
+        Assert.True(buff.IsEnding);
+        Assert.Equal("2", buff.Duration);
+        Assert.True(buff.HasDuration);
+        Assert.Equal("Jesteś ukryty pośród swoich odbić.", buff.Description);
+    }
+
+    [AvaloniaFact]
+    public async Task OnCharacterAffectsChanged_WatchedBuffGone_ClearsEndingState()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "armor";
+        viewModel.AddBuffCommand.Execute(null);
+        RaiseAffectsChanged(viewModel, new CharacterAffect("armor", "", Negative: false, Ending: true, ExtraValue: null));
+        Dispatcher.UIThread.RunJobs();
+
+        RaiseAffectsChanged(viewModel);
+        Dispatcher.UIThread.RunJobs();
+
+        var buff = Assert.Single(viewModel.RequiredBuffs);
+        Assert.False(buff.IsActive);
+        Assert.False(buff.IsEnding);
+        Assert.False(buff.HasDuration);
+    }
+
+    [AvaloniaFact]
+    public async Task UnwatchedActiveEffects_ExcludesWatchedBuffsAndKeepsEverythingElse()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        viewModel.NewBuffName = "armor";
+        viewModel.AddBuffCommand.Execute(null);
+
+        RaiseAffectsChanged(
+            viewModel,
+            new CharacterAffect("armor", "", Negative: false, Ending: false, ExtraValue: null),
+            new CharacterAffect("blindness", "Nic nie widzisz.", Negative: true, Ending: false, ExtraValue: null));
+        Dispatcher.UIThread.RunJobs();
+
+        var unwatched = viewModel.UnwatchedActiveEffects.Select(effect => effect.Name).ToList();
+        Assert.Equal(["blindness"], unwatched);
+    }
+
+    [AvaloniaFact]
+    public async Task MoveBuff_ReordersWithinSet()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        foreach (var name in new[] { "armor", "bless", "sanctuary" })
+        {
+            viewModel.NewBuffName = name;
+            viewModel.AddBuffCommand.Execute(null);
+        }
+
+        var sanctuary = viewModel.RequiredBuffs.Single(buff => buff.Name == "sanctuary");
+        viewModel.MoveBuff(sanctuary, 0);
+
+        Assert.Equal(["sanctuary", "armor", "bless"], viewModel.RequiredBuffs.Select(buff => buff.Name));
+    }
+
+    [AvaloniaFact]
+    public async Task ShowMemSpellSlots_DefaultsOnAndPersistsToggle()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        Assert.True(viewModel.ShowMemSpellSlots);
+
+        viewModel.ShowMemSpellSlots = false;
+
+        Assert.False(viewModel.ShowMemSpellSlots);
+    }
 }

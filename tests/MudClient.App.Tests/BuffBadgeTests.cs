@@ -49,11 +49,11 @@ public sealed class BuffBadgeTests : IAsyncDisposable
         // now-removed standalone Buffs tool) instead of a separate "🛡 Buffy" tab.
         var factory = Assert.IsType<MudDockFactory>(_vm.Layout.Factory);
         var memTool = factory.AllTools.Single(tool => tool.Id == "MemSpells");
-        Assert.Equal("📜 Mem i Buffy", memTool.Title);
+        Assert.Equal("📜 Mem, Buffy i Kondycja", memTool.Title);
 
         _vm.NewBuffName = "armor";
         _vm.AddBuffCommand.Execute(null);
 
-        Assert.Equal("📜 Mem i Buffy 0/1", memTool.Title);
+        Assert.Equal("📜 Mem, Buffy i Kondycja 0/1", memTool.Title);
     }
 }

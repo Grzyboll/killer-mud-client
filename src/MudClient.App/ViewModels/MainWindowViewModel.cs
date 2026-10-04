@@ -379,6 +379,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// </summary>
     private readonly HashSet<string> _activeAffectNames = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Latest Char.Affects entry per normalized name — the richer counterpart to
+    /// <see cref="_activeAffectNames"/>, used to carry Ending/Duration/Description onto a matching
+    /// <see cref="BuffWatchEntry"/> (see <see cref="ApplyActiveAffectStatus"/>). When the same
+    /// normalized name appears more than once (e.g. stacked "mirror image (3)"/"(7)"), the entry
+    /// reporting Ending wins, since that's the more actionable state to surface.</summary>
+    private readonly Dictionary<string, CharacterAffect> _latestAffectsByNormalizedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // --- Profiles ---
     private string? _activeProfileName;
     private string _activeProfileLogin = string.Empty;
@@ -2178,6 +2186,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.ShowMemSpellSlots"/>.</summary>
+    public bool ShowMemSpellSlots
+    {
+        get => _profileSettings.ShowMemSpellSlots;
+        set
+        {
+            if (_profileSettings.ShowMemSpellSlots == value)
+            {
+                return;
+            }
+
+            _profileSettings.ShowMemSpellSlots = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public string TelnetColorScheme
     {
         get => _settings.TelnetColorScheme;
@@ -3039,6 +3064,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoRecastOnLeaderSnapEnabled));
         OnPropertyChanged(nameof(AutoRecastOnLeaderSnapCommandsText));
         OnPropertyChanged(nameof(ShowExtendedEffects));
+        OnPropertyChanged(nameof(ShowMemSpellSlots));
         OnPropertyChanged(nameof(AutowalkMovementRecoveryEnabled));
         OnPropertyChanged(nameof(AutowalkRestOnArrivalEnabled));
         OnPropertyChanged(nameof(AutoStandOrderEnabled));
@@ -6559,6 +6585,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             BuffSetNameDraft = value.Name;
             OnPropertyChanged(nameof(RequiredBuffs));
+            OnPropertyChanged(nameof(UnwatchedActiveEffects));
             RefreshBuffIndicators();
             RenameBuffSetCommand.NotifyCanExecuteChanged();
             if (!_loadingBuffSets)
@@ -6571,6 +6598,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Buffs in the currently selected set.</summary>
     public ObservableCollection<BuffWatchEntry> RequiredBuffs =>
         SelectedBuffSet?.Buffs ?? [];
+
+    /// <summary>Currently active Char.Affects entries that aren't already one of
+    /// <see cref="RequiredBuffs"/> — folded into the Buffy section (see
+    /// <see cref="OnCharacterAffectsChanged"/>) instead of a separate "Efekty" panel, so nothing
+    /// active goes unseen just because it wasn't explicitly added to a watch set. Read-only in the
+    /// UI: no recast/delete, since there's nothing configured here to act on.</summary>
+    public IEnumerable<StatusEffect> UnwatchedActiveEffects => Effects.Where(effect =>
+        !RequiredBuffs.Any(buff => string.Equals(
+            BuffWatchEntry.NormalizeName(buff.Name),
+            BuffWatchEntry.NormalizeName(effect.Name),
+            StringComparison.OrdinalIgnoreCase)));
 
     public RelayCommand AddBuffCommand { get; }
     public RelayCommand<BuffWatchEntry> DeleteBuffCommand { get; }
@@ -6602,7 +6640,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Mirrors the buff state onto the Mem dock tab title ("📜 Mem i Buffy 2/3"), so the
+    /// Mirrors the buff state onto the Mem dock tab title ("📜 Mem, Buffy i Kondycja 2/3"), so the
     /// missing-buff signal is visible even when another tab covers the panel.
     /// </summary>
     private void UpdateMemToolTitle()
@@ -6614,7 +6652,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        tool.Title = RequiredBuffs.Count == 0 ? "📜 Mem i Buffy" : $"📜 Mem i Buffy {BuffsBadge}";
+        tool.Title = RequiredBuffs.Count == 0
+            ? "📜 Mem, Buffy i Kondycja"
+            : $"📜 Mem, Buffy i Kondycja {BuffsBadge}";
     }
 
     /// <summary>
@@ -6752,14 +6792,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var buff = new BuffWatchEntry(name)
-        {
-            IsActive = _activeAffectNames.Contains(normalized),
-        };
+        var buff = new BuffWatchEntry(name);
+        ApplyActiveAffectStatus(buff);
         ApplyMemorizationStatus(buff);
         RequiredBuffs.Add(buff);
         NewBuffName = string.Empty;
         RefreshBuffIndicators();
+        OnPropertyChanged(nameof(UnwatchedActiveEffects));
         SaveActiveProfile();
     }
 
@@ -6772,6 +6811,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         RequiredBuffs.Remove(entry);
         RefreshBuffIndicators();
+        OnPropertyChanged(nameof(UnwatchedActiveEffects));
+        SaveActiveProfile();
+    }
+
+    /// <summary>Moves a watched buff to a new position within the currently selected set — the
+    /// drag-reorder gesture in MemSpellsPanelView.axaml.cs's code-behind calls this directly (it's
+    /// not exposed as an <c>ICommand</c> since nothing binds to it declaratively).</summary>
+    public void MoveBuff(BuffWatchEntry entry, int newIndex)
+    {
+        var buffs = RequiredBuffs;
+        var oldIndex = buffs.IndexOf(entry);
+        if (oldIndex < 0 || newIndex < 0 || newIndex >= buffs.Count || oldIndex == newIndex)
+        {
+            return;
+        }
+
+        buffs.Move(oldIndex, newIndex);
         SaveActiveProfile();
     }
 
@@ -7775,10 +7831,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(buffName))
                 {
-                    var buff = new BuffWatchEntry(buffName)
-                    {
-                        IsActive = _activeAffectNames.Contains(BuffWatchEntry.NormalizeName(buffName)),
-                    };
+                    var buff = new BuffWatchEntry(buffName);
+                    ApplyActiveAffectStatus(buff);
                     ApplyMemorizationStatus(buff);
                     set.Buffs.Add(buff);
                 }
@@ -10158,6 +10212,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             () => Map.AutoWalkOnMapDoubleClick, v => Map.AutoWalkOnMapDoubleClick = v),
         new("extendedeffects", "Rozszerzone efekty", "Rozszerzone informacje o aktywnych efektach.",
             () => ShowExtendedEffects, v => ShowExtendedEffects = v),
+        new("showmemslots", "Pokaż mem", "Lista zapamiętanych zaklęć wg kręgu w panelu Mem.",
+            () => ShowMemSpellSlots, v => ShowMemSpellSlots = v),
         new("chatsound", "Dźwięk czatu", "Krótki dźwięk przy nowej wiadomości na czacie.",
             () => ChatSoundOnNewMessageEnabled, v => ChatSoundOnNewMessageEnabled = v),
         new("timersbar", "Timery na pasku", "Pasek aktywnych timerów nad polem komend.",
@@ -11683,19 +11739,51 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             Effects.Clear();
             _activeAffectNames.Clear();
+            _latestAffectsByNormalizedName.Clear();
             foreach (var affect in affects)
             {
                 Effects.Add(StatusEffect.FromCore(affect));
-                _activeAffectNames.Add(BuffWatchEntry.NormalizeName(affect.Name));
+                var normalized = BuffWatchEntry.NormalizeName(affect.Name);
+                _activeAffectNames.Add(normalized);
+                if (!_latestAffectsByNormalizedName.TryGetValue(normalized, out var existing) ||
+                    (!existing.Ending && affect.Ending))
+                {
+                    _latestAffectsByNormalizedName[normalized] = affect;
+                }
             }
 
             foreach (var buff in BuffSets.SelectMany(set => set.Buffs))
             {
-                buff.IsActive = _activeAffectNames.Contains(BuffWatchEntry.NormalizeName(buff.Name));
+                ApplyActiveAffectStatus(buff);
             }
 
             RefreshBuffIndicators();
+            OnPropertyChanged(nameof(UnwatchedActiveEffects));
         });
+    }
+
+    /// <summary>Syncs <see cref="BuffWatchEntry.IsActive"/>/<see cref="BuffWatchEntry.IsEnding"/>/
+    /// <see cref="BuffWatchEntry.Duration"/>/<see cref="BuffWatchEntry.Description"/> from the
+    /// latest Char.Affects snapshot (see <see cref="_latestAffectsByNormalizedName"/>) — called
+    /// from <see cref="OnCharacterAffectsChanged"/> for every watched buff, and from
+    /// <see cref="AddBuff"/>/the profile-load path so a buff reflects the current affect state the
+    /// moment it's added instead of waiting for the next Char.Affects tick.</summary>
+    private void ApplyActiveAffectStatus(BuffWatchEntry buff)
+    {
+        var normalized = BuffWatchEntry.NormalizeName(buff.Name);
+        buff.IsActive = _activeAffectNames.Contains(normalized);
+        if (_latestAffectsByNormalizedName.TryGetValue(normalized, out var affect))
+        {
+            buff.IsEnding = affect.Ending;
+            buff.Duration = affect.ExtraValue ?? string.Empty;
+            buff.Description = affect.Description;
+        }
+        else
+        {
+            buff.IsEnding = false;
+            buff.Duration = string.Empty;
+            buff.Description = string.Empty;
+        }
     }
 
     private void OnRoomPeopleChanged(IReadOnlyList<RoomPerson> people)

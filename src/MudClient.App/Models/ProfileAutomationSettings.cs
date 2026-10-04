@@ -85,8 +85,14 @@ public sealed class ProfileAutomationSettings
     public bool LordModeEnabled { get; set; }
 
     /// <summary>Shows each effect's count/duration and description alongside its name in the
-    /// Effects panel, instead of just the name.</summary>
+    /// Mem panel's Buffy section, instead of just the name.</summary>
     public bool ShowExtendedEffects { get; set; }
+
+    /// <summary>Shows the per-circle memorized-spell slot list in the Mem panel. Off hides that
+    /// list, leaving only Kondycja and Buffy visible — for someone who only cares about buff
+    /// upkeep and conditions, not the raw mem-slot breakdown. Defaults to true so existing
+    /// profiles keep seeing exactly what they already did.</summary>
+    public bool ShowMemSpellSlots { get; set; } = true;
 
     /// <summary>Double-clicking a room on the map immediately starts walking there, instead of
     /// only previewing the route until confirmed.</summary>

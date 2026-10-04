@@ -325,9 +325,9 @@ public sealed class MudDockFactory : Factory, IFactory
     {
         NewTool("Map", "🗺 Mapa", typeof(Views.Panels.MapPanelView), _mapContext);
         NewTool("Terminal", "Terminal", typeof(Views.Panels.TerminalPanelView), _mainContext);
-        NewTool("Effects", "✨ Efekty i Kondycja", typeof(Views.Panels.EffectsPanelView), _mainContext);
         NewTool("Group", "👥 Drużyna", typeof(Views.Panels.GroupPanelView), _mainContext);
-        NewTool("MemSpells", "📜 Mem i Buffy", typeof(Views.Panels.MemSpellsPanelView), _mainContext);
+        // Folds in the former standalone "Effects"/Kondycja tool — see MemSpellsPanelView.axaml.
+        NewTool("MemSpells", "📜 Mem, Buffy i Kondycja", typeof(Views.Panels.MemSpellsPanelView), _mainContext);
         NewTool("Automation", "⚙ Automaty", typeof(Views.Panels.AutomationPanelView), _mainContext);
         NewTool("AutomationTeam", "⚙ Auto: Drużyna", typeof(Views.Panels.TeamAutomationPanelView), _mainContext);
         NewTool("AutomationTravel", "⚙ Auto: Podróż", typeof(Views.Panels.TravelAutomationPanelView), _mainContext);
@@ -390,7 +390,7 @@ public sealed class MudDockFactory : Factory, IFactory
     /// Builds a 2-pane layout for narrow/half-screen windows — e.g. running two accounts
     /// side-by-side on one monitor, where DEFAULT's 3-column split (Map + Terminal + character
     /// tabs) clips at the panels' own ~230-300px minimum widths. Terminal plus a single
-    /// right-hand column with the Group/Effects/MemSpells tabs; no Map pane and no second
+    /// right-hand column with the Group/MemSpells tabs; no Map pane and no second
     /// right-hand row — a third column is exactly what stops fitting at that width. Everything
     /// else (Map included) starts hidden, same as DEFAULT, restorable via "Przywróć panele".
     /// Normal docking, not TRANSPARENCY's overlay-pinning mode.
@@ -399,7 +399,6 @@ public sealed class MudDockFactory : Factory, IFactory
     {
         CreateAllTools();
         var terminalTool = Tool("Terminal");
-        var effectsTool = Tool("Effects");
         var groupTool = Tool("Group");
         var memSpellsTool = Tool("MemSpells");
         var mapTool = Tool("Map");
@@ -427,8 +426,8 @@ public sealed class MudDockFactory : Factory, IFactory
         {
             Id = "RightPane",
             Proportion = 0.35,
-            ActiveDockable = effectsTool,
-            VisibleDockables = CreateList<IDockable>(effectsTool, groupTool, memSpellsTool),
+            ActiveDockable = groupTool,
+            VisibleDockables = CreateList<IDockable>(groupTool, memSpellsTool),
             Alignment = Alignment.Right,
         };
 
@@ -470,7 +469,6 @@ public sealed class MudDockFactory : Factory, IFactory
         CreateAllTools();
         var mapTool = Tool("Map");
         var terminalTool = Tool("Terminal");
-        var effectsTool = Tool("Effects");
         var groupTool = Tool("Group");
         var memSpellsTool = Tool("MemSpells");
         var automationTool = Tool("Automation");
@@ -508,9 +506,8 @@ public sealed class MudDockFactory : Factory, IFactory
         {
             Id = "RightTopPane",
             Proportion = 0.5,
-            ActiveDockable = effectsTool,
-            VisibleDockables = CreateList<IDockable>(
-                effectsTool, groupTool, memSpellsTool),
+            ActiveDockable = groupTool,
+            VisibleDockables = CreateList<IDockable>(groupTool, memSpellsTool),
             Alignment = Alignment.Right,
         };
 

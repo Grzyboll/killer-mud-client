@@ -37,7 +37,7 @@ public sealed class BuffsPanelUiTests
         var tool = new PanelTool
         {
             Id = "MemSpells",
-            Title = "📜 Mem i Buffy",
+            Title = "📜 Mem, Buffy i Kondycja",
             ViewType = typeof(MemSpellsPanelView),
             Context = viewModel,
         };
@@ -150,10 +150,15 @@ public sealed class BuffsPanelUiTests
                 Assert.True(
                     recastButton.Bounds.Width > 200,
                     $"Buff button remained collapsed at {recastButton.Bounds.Width}px.");
+                // Each row now has a drag handle ("⠿") column beside the button, so the button fills
+                // the list minus that handle rather than the whole width.
+                var handle = panel.GetVisualDescendants().OfType<TextBlock>()
+                    .First(text => text.Text == "⠿" && text.IsEffectivelyVisible);
+                var available = buffList.Bounds.Width - handle.Bounds.Width;
                 Assert.True(
-                    recastButton.Bounds.Width >= buffList.Bounds.Width - 2,
+                    recastButton.Bounds.Width >= available - 6,
                     $"Buff button width {recastButton.Bounds.Width}px did not fill "
-                    + $"the {buffList.Bounds.Width}px list.");
+                    + $"the {available}px left beside the drag handle.");
                 Assert.True(nameLabel.Bounds.Width > 20);
                 Assert.Contains(
                     recastButton.GetVisualDescendants().OfType<Button>(),

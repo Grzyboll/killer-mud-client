@@ -39,9 +39,9 @@ public sealed class EffectsPanelUiTests
 
             var tool = new PanelTool
             {
-                Id = "Effects",
-                Title = "Efekty i Kondycja",
-                ViewType = typeof(EffectsPanelView),
+                Id = "MemSpells",
+                Title = "Mem, Buffy i Kondycja",
+                ViewType = typeof(MemSpellsPanelView),
                 Context = viewModel,
             };
             var host = new PanelToolView { DataContext = tool };

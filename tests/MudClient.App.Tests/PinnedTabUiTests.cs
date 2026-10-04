@@ -502,7 +502,7 @@ public sealed class PinnedTabUiTests : IDisposable
             .Select(tool => tool.Id)
             .ToHashSet();
         Assert.Equal(
-            new HashSet<string> { "Terminal", "Effects", "Group", "MemSpells" },
+            new HashSet<string> { "Terminal", "Group", "MemSpells" },
             visibleIds);
 
         var hiddenIds = viewModel.HiddenPanels.Select(tool => tool.Id).ToHashSet();
@@ -715,7 +715,7 @@ public sealed class PinnedTabUiTests : IDisposable
         var factory = Assert.IsType<MudDockFactory>(viewModel.Layout.Factory);
         // Pin enough tools into the same column to force a tall stack that would want more
         // vertical room than the output row alone provides.
-        foreach (var id in new[] { "Gmcp", "Notes", "Group", "Effects", "MemSpells" })
+        foreach (var id in new[] { "Gmcp", "Notes", "Group", "MemSpells" })
         {
             factory.AllTools.First(t => t.Id == id).PinAsOverlayCommand.Execute(null);
         }

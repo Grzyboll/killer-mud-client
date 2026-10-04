@@ -43,6 +43,29 @@ public sealed partial class BuffWatchEntry : ObservableObject
 
     public bool HasCircle => Circle is not null;
 
+    /// <summary>True when the matching Char.Affects entry reports <c>Ending</c> — the buff is
+    /// about to wear off. Mirrors <see cref="StatusEffect.Ending"/>, kept in sync from
+    /// <see cref="ViewModels.MainWindowViewModel"/> whenever Char.Affects updates, the same way
+    /// <see cref="IsActive"/> already is.</summary>
+    [ObservableProperty]
+    private bool _isEnding;
+
+    /// <summary>The matching Char.Affects entry's extra value (e.g. a remaining-count display),
+    /// or empty when not currently active. Mirrors <see cref="StatusEffect.Duration"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDuration))]
+    private string _duration = string.Empty;
+
+    public bool HasDuration => !string.IsNullOrWhiteSpace(Duration);
+
+    /// <summary>The matching Char.Affects entry's description, or empty when not currently
+    /// active. Mirrors <see cref="StatusEffect.Description"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDescription))]
+    private string _description = string.Empty;
+
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
+
     /// <summary>
     /// Normalizes an affect name for comparison: the server appends a
     /// parenthesized counter to some affects (e.g. "mirror image (7)"),

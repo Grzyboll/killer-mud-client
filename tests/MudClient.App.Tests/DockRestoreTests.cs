@@ -33,7 +33,7 @@ public sealed class DockRestoreTests
     public void CloseAllThenRestoreAll_RightTop()
     {
         var factory = CreateFactory(out var layout);
-        var ids = new[] { "Effects", "Group", "MemSpells" };
+        var ids = new[] { "Group", "MemSpells" };
 
         foreach (var id in ids)
         {
@@ -74,15 +74,15 @@ public sealed class DockRestoreTests
     public void ShowTool_SelectsRequestedTab()
     {
         var factory = CreateFactory(out _);
-        var effects = GetTool(factory, "Effects");
+        var mem = GetTool(factory, "MemSpells");
         var group = GetTool(factory, "Group");
-        var owner = Assert.IsType<ToolDock>(effects.Owner);
+        var owner = Assert.IsType<ToolDock>(mem.Owner);
         factory.SetActiveDockable(group);
 
-        var shown = factory.ShowTool("Effects");
+        var shown = factory.ShowTool("MemSpells");
 
         Assert.True(shown);
-        Assert.Same(effects, owner.ActiveDockable);
+        Assert.Same(mem, owner.ActiveDockable);
     }
 
     // Dragging only performs Dock's regular local split next to the dock under the pointer.

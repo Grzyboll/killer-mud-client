@@ -36,7 +36,7 @@ public sealed class SpellMemorizedBrushConverter : IMultiValueConverter
     }
 }
 
-/// <summary>Colors the small "mem" indicator next to a tracked buff's name in the Mem i Buffy
+/// <summary>Colors the small "mem" indicator next to a tracked buff's name in the Mem, Buffy i Kondycja
 /// panel — the theme's default (light/parchment) foreground when
 /// <see cref="Models.BuffWatchEntry.IsMemorized"/> is true, crimson red when it's false. Unlike
 /// <see cref="SpellMemorizedBrushConverter"/> (which only reddens a button background, leaving the

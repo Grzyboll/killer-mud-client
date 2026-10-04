@@ -144,6 +144,37 @@
         </StackPanel>
       </Border>
 
+      <TextBlock Classes="mud-heading" Text="Jedzenie, picie i modlitwa" Margin="0,6,0,0" />
+      <Border Classes="mud-section" Padding="10">
+        <StackPanel Spacing="10">
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmSustenanceEnabled}"
+                      Content="Automatyczne jedzenie i picie — reaguj na Głód/Pragnienie (GMCP)" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Gdy GMCP zgłosi stan „Głód” lub „Pragnienie” (patrz panel Warunki): rzuca najsilniejsze z zaklęć poniżej, które akurat jest zapamiętane (np. „goodberry”), a jeśli żadne nie jest zapamiętane — memuje najsilniejsze z listy; następnie wysyła dodatkowe polecenia poniżej (np. „eat jag”). Działa niezależnie od tego, czy farma jest uruchomiona. Odpala się raz na wejście w stan głodu/pragnienia — nie powtarza, dopóki stan nie zniknie i nie wróci." />
+            <TextBox MinHeight="50"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Jedno zaklęcie na linię, najsilniejsze na górze&#x0a;np. goodberry"
+                     Text="{Binding AutoFarmSustenanceSpellNamesText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBox MinHeight="50"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     PlaceholderText="Dodatkowe polecenia, jedno na linię, np. eat jag&#x0a;eat jag&#x0a;eat jag"
+                     Text="{Binding AutoFarmSustenanceCommandsText, UpdateSourceTrigger=PropertyChanged}" />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmPrayerEnabled}"
+                      Content="Automatyczna modlitwa — wyślij „pray”, gdy umiejętność zejdzie z odnowienia" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="GMCP nie zgłasza żadnego stanu „wiara słabnie” — ta umiejętność (np. „holy prayer”) działa tak jak inne umiejętności z odnowieniem (smite evil, lay on hands): gdy tylko znów można jej użyć, klient wysyła „pray”, a jeśli farma jest akurat uruchomiona — na chwilę ją wstrzymuje, żeby modlitwy nie przerwało chodzenie czy walka, i wznawia ją sama po krótkiej pauzie." />
+            <TextBox Text="{Binding AutoFarmPrayerSkillName, UpdateSourceTrigger=PropertyChanged}"
+                     PlaceholderText="Nazwa umiejętności, np. holy prayer" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
       <TextBlock Classes="mud-heading" Text="Autokill" Margin="0,6,0,0" />
       <Border Classes="mud-section" Padding="10">
         <StackPanel Spacing="10">

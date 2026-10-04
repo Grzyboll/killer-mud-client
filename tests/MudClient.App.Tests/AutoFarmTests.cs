@@ -1294,4 +1294,456 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // BuildAutoFarmSustenanceCommands / TryAutoFarmSustenance —
+    // "Jedzenie, picie i modlitwa" (Auto: Farma)
+    // ====================================================================
+
+    [Fact]
+    public void BuildAutoFarmSustenanceCommands_NotEnabled_ReturnsEmpty()
+    {
+        var commands = MainWindowViewModel.BuildAutoFarmSustenanceCommands(
+            enabled: false,
+            spellNames: ["goodberry"],
+            memorizedSpells: [],
+            extraCommands: ["eat jag"]);
+
+        Assert.Empty(commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmSustenanceCommands_SpellMemorized_CastsThenAppendsExtraCommands()
+    {
+        var commands = MainWindowViewModel.BuildAutoFarmSustenanceCommands(
+            enabled: true,
+            spellNames: ["goodberry"],
+            memorizedSpells: [new MemorizedSpell(1, 1, "goodberry", Memed: true, Meming: false)],
+            extraCommands: ["eat jag", "eat jag"]);
+
+        Assert.Equal(["cast \"goodberry\" self", "eat jag", "eat jag"], commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmSustenanceCommands_SpellNotMemorized_MemorizesStrongestThenAppendsExtraCommands()
+    {
+        var commands = MainWindowViewModel.BuildAutoFarmSustenanceCommands(
+            enabled: true,
+            spellNames: ["goodberry"],
+            memorizedSpells: [],
+            extraCommands: ["eat jag"]);
+
+        Assert.Equal(["mem \"goodberry\"", "eat jag"], commands);
+    }
+
+    [Fact]
+    public void BuildAutoFarmSustenanceCommands_NoSpellsConfigured_OnlyExtraCommands()
+    {
+        var commands = MainWindowViewModel.BuildAutoFarmSustenanceCommands(
+            enabled: true,
+            spellNames: [],
+            memorizedSpells: [],
+            extraCommands: ["eat jag"]);
+
+        Assert.Equal(["eat jag"], commands);
+    }
+
+    private static CharacterConditionUpdate HungryCondition() => new(
+        Position: null,
+        Flags: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["hungry"] = true });
+
+    private static CharacterConditionUpdate ThirstyCondition() => new(
+        Position: null,
+        Flags: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["thirsty"] = true });
+
+    private static CharacterConditionUpdate NeitherHungryNorThirstyCondition() => new(
+        Position: null,
+        Flags: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["hungry"] = false,
+            ["thirsty"] = false,
+        });
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_Hungry_CastsAndEats()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_latestMemorizedSpells", new List<MemorizedSpell>
+            {
+                new(1, 1, "goodberry", Memed: true, Meming: false),
+            });
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceSpellNamesText = "goodberry";
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("cast \"goodberry\" self"));
+            Assert.Contains(output, line => line.Contains("eat jag"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_Thirsty_ActsTheSameAsHungry()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceCommandsText = "drink waterskin";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", ThirstyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("drink waterskin"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_NeitherHungryNorThirsty_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", NeitherHungryNorThirstyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_Disabled_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_StaysHungry_OnlyActsOnce()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(output, line => line.Contains("eat jag"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSustenance_RecoversThenHungryAgain_ActsAgain()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", NeitherHungryNorThirstyCondition().Flags);
+            InvokePrivate(viewModel, "TryAutoFarmSustenance", HungryCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, output.Count(line => line.Contains("eat jag")));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task OnCharacterConditionChanged_Hungry_TriggersSustenance()
+    {
+        // Confirms the real GMCP wiring (not just TryAutoFarmSustenance called directly).
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSustenanceEnabled = true;
+            viewModel.AutoFarmSustenanceCommandsText = "eat jag";
+
+            InvokePrivate(viewModel, "OnCharacterConditionChanged", HungryCondition());
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("eat jag"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    // ====================================================================
+    // ShouldTriggerAutoFarmPrayer / TryAutoFarmPrayer / SetSkillOnCooldown —
+    // "Automatyczna modlitwa" (Auto: Farma)
+    // ====================================================================
+
+    [Theory]
+    [InlineData(true, "holy prayer", "holy prayer", true)]
+    [InlineData(true, "Holy Prayer", "holy prayer", true)]
+    [InlineData(true, " holy prayer ", "holy prayer", true)]
+    [InlineData(false, "holy prayer", "holy prayer", false)]
+    [InlineData(true, "holy prayer", "lay on hands", false)]
+    [InlineData(true, "", "holy prayer", false)]
+    public void ShouldTriggerAutoFarmPrayer_VariousInputs(
+        bool enabled, string configuredSkillName, string readySkillName, bool expected)
+    {
+        Assert.Equal(
+            expected,
+            MainWindowViewModel.ShouldTriggerAutoFarmPrayer(enabled, configuredSkillName, readySkillName));
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmPrayer_ConfiguredSkillReady_SendsPray()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "TryAutoFarmPrayer", "holy prayer");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("pray"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmPrayer_DifferentSkillReady_DoesNotSendPray()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "TryAutoFarmPrayer", "lay on hands");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmPrayer_FarmActive_PausesFarm()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "TryAutoFarmPrayer", "holy prayer");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("pray"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmPrayer_FarmNotActive_DoesNotTouchPauseFlag()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "TryAutoFarmPrayer", "holy prayer");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("pray"));
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmPrayer_FarmActive_ResumesAfterPauseDelayElapses()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmPrayerPauseMilliseconds", 10);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "TryAutoFarmPrayer", "holy prayer");
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autoFarmPrayerPauseCts");
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("ResumeAutoFarmAfterPrayerAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [cts.Token])!;
+            await task;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SetSkillOnCooldown_ConfiguredPrayerSkillComesOffCooldown_SendsPray()
+    {
+        // The real wiring: Char.Skills.Timeout reporting the skill ready again (removed from
+        // SkillsOnCooldown, see OnSkillTimeoutsChanged) must itself trigger prayer, not just a
+        // direct TryAutoFarmPrayer call.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "SetSkillOnCooldown", "holy prayer", true);
+            InvokePrivate(viewModel, "SetSkillOnCooldown", "holy prayer", false);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("pray"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SetSkillOnCooldown_SkillNeverWasOnCooldown_DoesNotSendPray()
+    {
+        // SetSkillOnCooldown(name, onCooldown: false) also fires for a skill GMCP simply never
+        // reported as on cooldown in the first place — must not spuriously pray in that case.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmPrayerEnabled = true;
+            viewModel.AutoFarmPrayerSkillName = "holy prayer";
+
+            InvokePrivate(viewModel, "SetSkillOnCooldown", "holy prayer", false);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

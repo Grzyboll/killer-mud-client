@@ -69,6 +69,58 @@
         </ItemsControl>
       </StackPanel>
 
+      <!-- Efekty (live from Char.Affects GMCP) — every currently active effect, read-only, directly
+           under Kondycja at the top. Buffs on a watch list are shown in Buffy below and are excluded
+           here so nothing appears twice. -->
+      <StackPanel Spacing="4">
+        <TextBlock Classes="mud-heading" Text="Efekty" />
+        <TextBlock Classes="mud-faint" Text="Brak aktywnych efektów."
+                   IsVisible="{Binding !Effects.Count}" />
+        <ItemsControl ItemsSource="{Binding UnwatchedActiveEffects}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="models:StatusEffect">
+              <Border Classes="effect-entry"
+                      Classes.debuff="{Binding IsDebuff}"
+                      Classes.pulsing="{Binding Ending}"
+                      BorderThickness="1"
+                      CornerRadius="3"
+                      Padding="6,3"
+                      Margin="0,1">
+                <Grid ColumnDefinitions="Auto,*"
+                      RowDefinitions="Auto,Auto">
+                  <TextBlock Grid.Column="0" Grid.Row="0"
+                             Classes="effect-icon"
+                             Classes.debuff="{Binding IsDebuff}"
+                             Text="{Binding Icon}"
+                             Margin="0,0,6,0" />
+                  <StackPanel Grid.Column="1" Grid.Row="0"
+                              Orientation="Horizontal" Spacing="4">
+                    <TextBlock Classes="effect-name"
+                               Classes.debuff="{Binding IsDebuff}"
+                               Text="{Binding Name}"
+                               ToolTip.Tip="{Binding Description}" />
+                    <TextBlock Text="{Binding Duration, StringFormat='({0})'}"
+                               Classes="mud-faint"
+                               IsVisible="{Binding HasDuration}" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Grid.Row="1"
+                             Text="{Binding Description}"
+                             Classes="mud-faint"
+                             TextTrimming="CharacterEllipsis">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static aconv:BoolConverters.And}">
+                        <Binding Path="HasDescription" />
+                        <Binding Path="$parent[ItemsControl].DataContext.ShowExtendedEffects" />
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
       <!-- Buffy (live from Char.Affects GMCP, matched against user-defined watch sets, plus every
            other currently active effect that isn't on a watch list — folded in from the former
            standalone "Efekty" panel so nothing active goes unseen). Set management (create/rename/
@@ -205,52 +257,6 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
 
-        <!-- Every other currently active effect not on the watch list above — the former
-             standalone "Efekty" panel's content, read-only (no recast/delete, nothing here is
-             user-configured). -->
-        <ItemsControl ItemsSource="{Binding UnwatchedActiveEffects}" Margin="0,4,0,0">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:StatusEffect">
-              <Border Classes="effect-entry"
-                      Classes.debuff="{Binding IsDebuff}"
-                      Classes.pulsing="{Binding Ending}"
-                      BorderThickness="1"
-                      CornerRadius="3"
-                      Padding="6,3"
-                      Margin="0,1">
-                <Grid ColumnDefinitions="Auto,*"
-                      RowDefinitions="Auto,Auto">
-                  <TextBlock Grid.Column="0" Grid.Row="0"
-                             Classes="effect-icon"
-                             Classes.debuff="{Binding IsDebuff}"
-                             Text="{Binding Icon}"
-                             Margin="0,0,6,0" />
-                  <StackPanel Grid.Column="1" Grid.Row="0"
-                              Orientation="Horizontal" Spacing="4">
-                    <TextBlock Classes="effect-name"
-                               Classes.debuff="{Binding IsDebuff}"
-                               Text="{Binding Name}"
-                               ToolTip.Tip="{Binding Description}" />
-                    <TextBlock Text="{Binding Duration, StringFormat='({0})'}"
-                               Classes="mud-faint"
-                               IsVisible="{Binding HasDuration}" />
-                  </StackPanel>
-                  <TextBlock Grid.Column="1" Grid.Row="1"
-                             Text="{Binding Description}"
-                             Classes="mud-faint"
-                             TextTrimming="CharacterEllipsis">
-                    <TextBlock.IsVisible>
-                      <MultiBinding Converter="{x:Static aconv:BoolConverters.And}">
-                        <Binding Path="HasDescription" />
-                        <Binding Path="$parent[ItemsControl].DataContext.ShowExtendedEffects" />
-                      </MultiBinding>
-                    </TextBlock.IsVisible>
-                  </TextBlock>
-                </Grid>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
       </StackPanel>
 
       <!-- Zapamiętane zaklęcia (live from Char.MemSpell GMCP) — hidden entirely when "Pokaż mem"

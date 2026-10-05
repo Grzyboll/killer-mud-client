@@ -147,10 +147,9 @@
                      Margin="6,8"
                      IsVisible="{Binding !RequiredBuffs.Count}" />
 
-          <!-- Rows follow DisplayedBuffs (attention-first when that setting is on); a drag moves the
-               buff within RequiredBuffs, the saved order. -->
+          <!-- Rows keep the saved order; a drag moves the buff within it. -->
           <ItemsControl Name="BuffsItemsControl"
-                        ItemsSource="{Binding DisplayedBuffs}"
+                        ItemsSource="{Binding RequiredBuffs}"
                         PointerMoved="BuffsItemsControl_OnPointerMoved">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="models:BuffWatchEntry">

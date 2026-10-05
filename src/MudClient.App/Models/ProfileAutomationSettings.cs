@@ -94,10 +94,6 @@ public sealed class ProfileAutomationSettings
     /// profiles keep seeing exactly what they already did.</summary>
     public bool ShowMemSpellSlots { get; set; } = true;
 
-    /// <summary>Lists watched buffs that are missing or about to end above the rest of Buffy. Only
-    /// changes display order — the saved order (and drag-reorder) is untouched.</summary>
-    public bool BuffAttentionFirstEnabled { get; set; } = true;
-
     /// <summary>Ids of the Mem panel's sections the user collapsed ("Kondycja", "Efekty", "Buffy",
     /// "Mem"). Persisted per profile so a collapsed section stays collapsed across restarts.</summary>
     public List<string> CollapsedMemPanelSections { get; set; } = [];

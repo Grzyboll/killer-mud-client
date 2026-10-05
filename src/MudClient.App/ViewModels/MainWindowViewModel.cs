@@ -5300,8 +5300,14 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
-            var path = GetPathfinder()?.FindPathByVnum(
-                vnum, _autowalkPath.To.Vnum ?? string.Empty, _autowalkExcludedRoomIds);
+            // A follow walk that drifted off its route goes back to retracing the leader's own steps
+            // (see TryBuildLeaderTrailPath) rather than the pathfinder's shortest route, which can
+            // take the follower through rooms the leader deliberately avoided.
+            var path = (_autowalkIsFollowingLeader && _autowalkFollowTargetVnum is { } leaderVnum
+                    ? TryBuildLeaderTrailPath(vnum, leaderVnum)
+                    : null)
+                ?? GetPathfinder()?.FindPathByVnum(
+                    vnum, _autowalkPath.To.Vnum ?? string.Empty, _autowalkExcludedRoomIds);
             if (path is null)
             {
                 StopAutowalk(

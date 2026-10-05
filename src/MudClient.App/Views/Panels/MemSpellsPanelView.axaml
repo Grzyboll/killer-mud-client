@@ -28,7 +28,7 @@
 
     <!-- A buff/effect about to wear off pulses instead of just changing color, so it's noticeable
          without having to read every row's text. Applied to the whole row (Border.pulsing). -->
-    <Style Selector="Border.pulsing">
+    <Style Selector="Border.pulsing, TextBlock.pulsing">
       <Style.Animations>
         <Animation Duration="0:0:0.9" IterationCount="INFINITE" PlaybackDirection="Alternate">
           <KeyFrame Cue="0%">
@@ -47,26 +47,9 @@
            own state (hunger/thirst/...), read at a glance before buffs/mem. -->
       <StackPanel Spacing="4">
         <TextBlock Classes="mud-heading" Text="Kondycja" />
-        <TextBlock Classes="mud-faint" Text="W pełni sił — brak dolegliwości."
-                   IsVisible="{Binding !Conditions.Count}" />
-        <ItemsControl ItemsSource="{Binding Conditions}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <WrapPanel />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="x:String">
-              <Border Background="{StaticResource MudBrushStoneLight}"
-                      BorderBrush="{StaticResource MudBrushCrimson}"
-                      BorderThickness="1"
-                      CornerRadius="3" Padding="7,3" Margin="0,2,4,2">
-                <TextBlock Text="{Binding}"
-                           Foreground="{StaticResource MudBrushCrimsonBright}" />
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <TextBlock Text="{Binding ConditionsLine}" TextWrapping="Wrap"
+                   Foreground="{StaticResource MudBrushCrimsonBright}"
+                   Classes.mud-faint="{Binding !Conditions.Count}" />
       </StackPanel>
 
       <!-- Efekty (live from Char.Affects GMCP) — every currently active effect, read-only, directly
@@ -75,47 +58,19 @@
       <StackPanel Spacing="4">
         <TextBlock Classes="mud-heading" Text="Efekty" />
         <TextBlock Classes="mud-faint" Text="Brak aktywnych efektów."
-                   IsVisible="{Binding !Effects.Count}" />
-        <ItemsControl ItemsSource="{Binding UnwatchedActiveEffects}">
+                   IsVisible="{Binding !EffectLineItems.Count}" />
+        <!-- One comma-separated run that wraps as needed; each piece carries its own ", " (see
+             EffectLineItem) and an ending effect pulses like the buff rows do. -->
+        <ItemsControl ItemsSource="{Binding EffectLineItems}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:StatusEffect">
-              <Border Classes="effect-entry"
-                      Classes.debuff="{Binding IsDebuff}"
-                      Classes.pulsing="{Binding Ending}"
-                      BorderThickness="1"
-                      CornerRadius="3"
-                      Padding="6,3"
-                      Margin="0,1">
-                <Grid ColumnDefinitions="Auto,*"
-                      RowDefinitions="Auto,Auto">
-                  <TextBlock Grid.Column="0" Grid.Row="0"
-                             Classes="effect-icon"
-                             Classes.debuff="{Binding IsDebuff}"
-                             Text="{Binding Icon}"
-                             Margin="0,0,6,0" />
-                  <StackPanel Grid.Column="1" Grid.Row="0"
-                              Orientation="Horizontal" Spacing="4">
-                    <TextBlock Classes="effect-name"
-                               Classes.debuff="{Binding IsDebuff}"
-                               Text="{Binding Name}"
-                               ToolTip.Tip="{Binding Description}" />
-                    <TextBlock Text="{Binding Duration, StringFormat='({0})'}"
-                               Classes="mud-faint"
-                               IsVisible="{Binding HasDuration}" />
-                  </StackPanel>
-                  <TextBlock Grid.Column="1" Grid.Row="1"
-                             Text="{Binding Description}"
-                             Classes="mud-faint"
-                             TextTrimming="CharacterEllipsis">
-                    <TextBlock.IsVisible>
-                      <MultiBinding Converter="{x:Static aconv:BoolConverters.And}">
-                        <Binding Path="HasDescription" />
-                        <Binding Path="$parent[ItemsControl].DataContext.ShowExtendedEffects" />
-                      </MultiBinding>
-                    </TextBlock.IsVisible>
-                  </TextBlock>
-                </Grid>
-              </Border>
+            <DataTemplate x:DataType="models:EffectLineItem">
+              <TextBlock Text="{Binding Text}"
+                         Classes.pulsing="{Binding Ending}" />
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

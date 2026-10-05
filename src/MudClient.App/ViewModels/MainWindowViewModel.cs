@@ -2196,6 +2196,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             _profileSettings.ShowExtendedEffects = value;
             OnPropertyChanged();
+            NotifyEffectLines();
             SaveActiveProfile();
         }
     }
@@ -6693,7 +6694,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             BuffSetNameDraft = value.Name;
             OnPropertyChanged(nameof(RequiredBuffs));
-            OnPropertyChanged(nameof(UnwatchedActiveEffects));
+            NotifyEffectLines();
             RefreshBuffIndicators();
             RenameBuffSetCommand.NotifyCanExecuteChanged();
             if (!_loadingBuffSets)
@@ -6717,6 +6718,36 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             BuffWatchEntry.NormalizeName(buff.Name),
             BuffWatchEntry.NormalizeName(effect.Name),
             StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary><see cref="UnwatchedActiveEffects"/> as one comma-separated run, e.g.
+    /// "odbicie lustrzane (6), Ślepota" — the compact form the Efekty section shows to save space.</summary>
+    public IReadOnlyList<EffectLineItem> EffectLineItems
+    {
+        get
+        {
+            var effects = UnwatchedActiveEffects.ToArray();
+            return effects.Select((effect, index) => new EffectLineItem(
+                    (effect.HasDuration ? $"{effect.Name} ({effect.Duration})" : effect.Name)
+                    + (ShowExtendedEffects && effect.HasDescription ? $" — {effect.Description}" : string.Empty)
+                    + (index < effects.Length - 1 ? ", " : string.Empty),
+                    effect.Ending))
+                .ToArray();
+        }
+    }
+
+    /// <summary>The Kondycja flags as one comma-separated line, or the "all fine" text when none.</summary>
+    public string ConditionsLine => Conditions.Count == 0
+        ? "W pełni sił — brak dolegliwości."
+        : string.Join(", ", Conditions);
+
+    /// <summary>Re-raises everything the compact Kondycja/Efekty lines are derived from — called
+    /// wherever <see cref="Effects"/>, <see cref="Conditions"/> or the watched-buff set changes.</summary>
+    private void NotifyEffectLines()
+    {
+        OnPropertyChanged(nameof(UnwatchedActiveEffects));
+        OnPropertyChanged(nameof(EffectLineItems));
+        OnPropertyChanged(nameof(ConditionsLine));
+    }
 
     public RelayCommand AddBuffCommand { get; }
     public RelayCommand<BuffWatchEntry> DeleteBuffCommand { get; }
@@ -6906,7 +6937,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         RequiredBuffs.Add(buff);
         NewBuffName = string.Empty;
         RefreshBuffIndicators();
-        OnPropertyChanged(nameof(UnwatchedActiveEffects));
+        NotifyEffectLines();
         SaveActiveProfile();
     }
 
@@ -6919,7 +6950,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         RequiredBuffs.Remove(entry);
         RefreshBuffIndicators();
-        OnPropertyChanged(nameof(UnwatchedActiveEffects));
+        NotifyEffectLines();
         SaveActiveProfile();
     }
 
@@ -11159,6 +11190,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void OnLineReceived(string line)
     {
+        // Chat is mirrored before the capture coordinators below: while one of them is active it
+        // claims every line it sees, so a say/tell arriving during that window (an auto-get, a
+        // book refresh, ...) used to be dropped from the chat panel entirely.
+        if (ChatLinePolicy.IsCommunicationLine(line))
+        {
+            Dispatcher.UIThread.Post(() => ChatLineReceived?.Invoke(line));
+            if (ChatSoundOnNewMessageEnabled)
+            {
+                PlayNotificationSound();
+            }
+        }
+
         // The creator-only book/rare refreshes and "/mapuj" own complete response lines while
         // active. Raw text still reaches the terminal through TextReceived, but their output must
         // not fire user triggers (only one can be capturing at a time — see the mutual
@@ -11172,15 +11215,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             || _autoGetCoordinator.TryCaptureLine(line))
         {
             return;
-        }
-
-        if (ChatLinePolicy.IsCommunicationLine(line))
-        {
-            Dispatcher.UIThread.Post(() => ChatLineReceived?.Invoke(line));
-            if (ChatSoundOnNewMessageEnabled)
-            {
-                PlayNotificationSound();
-            }
         }
 
         if (IsDeathLine(line))
@@ -11995,6 +12029,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     Conditions.Add(TranslateCondition(flag));
                 }
             }
+
+            NotifyEffectLines();
         });
     }
 
@@ -12023,7 +12059,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             }
 
             RefreshBuffIndicators();
-            OnPropertyChanged(nameof(UnwatchedActiveEffects));
+            NotifyEffectLines();
         });
     }
 

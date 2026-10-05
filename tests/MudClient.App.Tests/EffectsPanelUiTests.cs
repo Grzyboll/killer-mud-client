@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Threading;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -13,6 +14,30 @@ namespace MudClient.App.Tests;
 [Collection(AvaloniaUiCollection.Name)]
 public sealed class EffectsPanelUiTests
 {
+    [Fact]
+    public async Task EffectLineItems_JoinWithCommasExceptAfterTheLast()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(), "KillerMudClient_EffectLine_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            await using var viewModel = new MainWindowViewModel(settingsService: new AppSettingsService(directory));
+            viewModel.Effects.Add(new StatusEffect("odbicie lustrzane", "[+]", "6", false, "", false, false, "6"));
+            viewModel.Effects.Add(new StatusEffect("ślepota", "[-]", "", true, "", true, true, null));
+
+            var items = viewModel.EffectLineItems;
+
+            Assert.Equal(["odbicie lustrzane (6), ", "ślepota"], items.Select(item => item.Text));
+            Assert.True(items[1].Ending);
+            Assert.Equal("W pełni sił — brak dolegliwości.", viewModel.ConditionsLine);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [AvaloniaFact]
     public async Task EffectDuration_ShowsInBasicView_DescriptionStaysExtendedOnly()
     {
@@ -36,6 +61,9 @@ public sealed class EffectsPanelUiTests
                 Negative: false,
                 Ending: false,
                 ExtraValue: "8"));
+            typeof(MainWindowViewModel)
+                .GetMethod("NotifyEffectLines", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .Invoke(viewModel, null);
 
             var tool = new PanelTool
             {
@@ -49,19 +77,21 @@ public sealed class EffectsPanelUiTests
             window.Show();
             AvaloniaHeadlessPlatform.ForceRenderTimerTick();
 
-            var durationLabel = host.GetVisualDescendants().OfType<TextBlock>()
-                .Single(text => text.Text == "(8)");
-            Assert.True(durationLabel.IsEffectivelyVisible);
-
-            var descriptionLabel = host.GetVisualDescendants().OfType<TextBlock>()
-                .Single(text => text.Text == "Jesteś ukryty pośród swoich odbić.");
-            Assert.False(descriptionLabel.IsEffectivelyVisible);
+            // The effects are one comma-separated line now: name and duration in the basic view,
+            // the description appended only while the extended view is on.
+            var effectLabel = host.GetVisualDescendants().OfType<TextBlock>()
+                .Single(text => text.Text == "odbicie lustrzane (8)");
+            Assert.True(effectLabel.IsEffectivelyVisible);
 
             viewModel.ShowExtendedEffects = true;
+            window.UpdateLayout();
             AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
 
-            Assert.True(durationLabel.IsEffectivelyVisible);
-            Assert.True(descriptionLabel.IsEffectivelyVisible);
+            var extendedLabel = host.GetVisualDescendants().OfType<TextBlock>()
+                .Single(text => text.Text == "odbicie lustrzane (8) — Jesteś ukryty pośród swoich odbić.");
+            Assert.True(extendedLabel.IsEffectivelyVisible);
 
             window.Close();
         }

@@ -57,6 +57,10 @@
                       IsChecked="{Binding ((vm:MainWindowViewModel)Context).ShowMemSpellSlots}" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap" MaxWidth="280"
                        Text="Wyłącz, by schować listę zapamiętanych zaklęć wg kręgu i zostawić tylko Kondycję i Buffy." />
+            <CheckBox Content="Brakujące buffy na górze"
+                      IsChecked="{Binding ((vm:MainWindowViewModel)Context).BuffAttentionFirstEnabled}" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap" MaxWidth="280"
+                       Text="Brakujące i kończące się buffy wędrują na początek listy. Zmienia tylko wyświetlanie — kolejność przeciągania zostaje." />
 
             <Border Height="1" Background="{StaticResource MudBrushSlate}" Margin="0,4" />
 

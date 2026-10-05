@@ -7,9 +7,7 @@
              x:Class="MudClient.App.Views.Panels.MemSpellsPanelView"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Styles>
-    <!-- Shared by both the watched-buff rows and the read-only "other active effects" rows below
-         — one merged module now covers what used to be two separate panels (Mem i Buffy /
-         Efekty i Kondycja), so both kinds of row share the same debuff/ending visual language. -->
+    <!-- Shared by both the watched-buff rows and the read-only effect rows below. -->
     <Style Selector="Border.effect-entry">
       <Setter Property="BorderBrush" Value="{StaticResource MudBrushEmerald}" />
     </Style>
@@ -26,8 +24,7 @@
       <Setter Property="Foreground" Value="{StaticResource MudBrushCrimsonBright}" />
     </Style>
 
-    <!-- A buff/effect about to wear off pulses instead of just changing color, so it's noticeable
-         without having to read every row's text. Applied to the whole row (Border.pulsing). -->
+    <!-- A buff/effect about to wear off pulses instead of just changing color. -->
     <Style Selector="Border.pulsing, TextBlock.pulsing">
       <Style.Animations>
         <Animation Duration="0:0:0.9" IterationCount="INFINITE" PlaybackDirection="Alternate">
@@ -40,220 +37,268 @@
         </Animation>
       </Style.Animations>
     </Style>
+
+    <!-- Section headers are buttons that fold their content away; the arrow shows the state. -->
+    <Style Selector="Button.section-toggle">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0,2" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
   </UserControl.Styles>
   <ScrollViewer>
     <StackPanel Spacing="10" Margin="12">
       <!-- Kondycja (live from Char.Condition GMCP) — at the top, since it's about the character's
            own state (hunger/thirst/...), read at a glance before buffs/mem. -->
       <StackPanel Spacing="4">
-        <TextBlock Classes="mud-heading" Text="Kondycja" />
+        <Button Classes="section-toggle"
+                Command="{Binding ToggleMemSectionCommand}"
+                CommandParameter="Kondycja">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="▾" IsVisible="{Binding IsKondycjaSectionOpen}" />
+            <TextBlock Text="▸" IsVisible="{Binding !IsKondycjaSectionOpen}" />
+            <TextBlock Classes="mud-heading" Text="Kondycja" />
+          </StackPanel>
+        </Button>
         <TextBlock Text="{Binding ConditionsLine}" TextWrapping="Wrap"
                    Foreground="{StaticResource MudBrushCrimsonBright}"
-                   Classes.mud-faint="{Binding !Conditions.Count}" />
+                   Classes.mud-faint="{Binding !Conditions.Count}"
+                   IsVisible="{Binding IsKondycjaSectionOpen}" />
       </StackPanel>
 
       <!-- Efekty (live from Char.Affects GMCP) — every currently active effect, read-only, directly
            under Kondycja at the top. Buffs on a watch list are shown in Buffy below and are excluded
            here so nothing appears twice. -->
       <StackPanel Spacing="4">
-        <TextBlock Classes="mud-heading" Text="Efekty" />
-        <TextBlock Classes="mud-faint" Text="Brak aktywnych efektów."
-                   IsVisible="{Binding !EffectLineItems.Count}" />
-        <!-- One comma-separated run that wraps as needed; each piece carries its own ", " (see
-             EffectLineItem) and an ending effect pulses like the buff rows do. -->
-        <ItemsControl ItemsSource="{Binding EffectLineItems}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <WrapPanel />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:EffectLineItem">
-              <TextBlock Text="{Binding Text}"
-                         Classes.pulsing="{Binding Ending}" />
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <Button Classes="section-toggle"
+                Command="{Binding ToggleMemSectionCommand}"
+                CommandParameter="Efekty">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="▾" IsVisible="{Binding IsEfektySectionOpen}" />
+            <TextBlock Text="▸" IsVisible="{Binding !IsEfektySectionOpen}" />
+            <TextBlock Classes="mud-heading" Text="Efekty" />
+          </StackPanel>
+        </Button>
+        <StackPanel Spacing="4" IsVisible="{Binding IsEfektySectionOpen}">
+          <TextBlock Classes="mud-faint" Text="Brak aktywnych efektów."
+                     IsVisible="{Binding !EffectLineItems.Count}" />
+          <!-- One comma-separated run that wraps as needed; each piece carries its own ", " (see
+               EffectLineItem) and an ending effect pulses like the buff rows do. -->
+          <ItemsControl ItemsSource="{Binding EffectLineItems}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:EffectLineItem">
+                <TextBlock Text="{Binding Text}"
+                           Classes.pulsing="{Binding Ending}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
       </StackPanel>
 
-      <!-- Buffy (live from Char.Affects GMCP, matched against user-defined watch sets, plus every
-           other currently active effect that isn't on a watch list — folded in from the former
-           standalone "Efekty" panel so nothing active goes unseen). Set management (create/rename/
-           delete a set, add a new buff to track, extended-effects toggle) lives in this panel's own
-           settings gear (see PanelToolView.axaml / TerminalOverlayCard.axaml). -->
+      <!-- Buffy (live from Char.Affects GMCP, matched against user-defined watch sets). Set
+           management (create/rename/delete a set, add a new buff to track, extended-effects toggle)
+           lives in this panel's own settings gear (see PanelToolView.axaml / TerminalOverlayCard.axaml). -->
       <StackPanel Spacing="4">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="mud-heading" Text="Buffy" VerticalAlignment="Center" />
-          <Border Grid.Column="1" Classes="mud-badge">
+          <Button Grid.Column="0" Classes="section-toggle"
+                  Command="{Binding ToggleMemSectionCommand}"
+                  CommandParameter="Buffy">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="▾" IsVisible="{Binding IsBuffySectionOpen}" />
+              <TextBlock Text="▸" IsVisible="{Binding !IsBuffySectionOpen}" />
+              <TextBlock Classes="mud-heading" Text="Buffy" />
+            </StackPanel>
+          </Button>
+          <Border Grid.Column="1" Classes="mud-badge" VerticalAlignment="Center">
             <TextBlock Text="{Binding BuffsBadge}" />
           </Border>
         </Grid>
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-          <ComboBox Grid.Column="0"
-                    ItemsSource="{Binding BuffSets}"
-                    SelectedItem="{Binding SelectedBuffSet, Mode=TwoWay}"
-                    HorizontalAlignment="Stretch"
-                    ToolTip.Tip="Aktywny zestaw buffów">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="models:BuffSetEntry">
-                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-          <Button Grid.Column="1"
-                  Content="RZUĆ BRAKUJĄCE"
-                  Classes="mud-small"
-                  ToolTip.Tip="/recast działa na aktualnie wybranym zestawie"
-                  Command="{Binding RecastBuffsCommand}" />
-        </Grid>
 
-        <TextBlock Classes="mud-faint"
-                   Text="Ten zestaw jest pusty."
-                   HorizontalAlignment="Center"
-                   Margin="6,8"
-                   IsVisible="{Binding !RequiredBuffs.Count}" />
+        <StackPanel Spacing="4" IsVisible="{Binding IsBuffySectionOpen}">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+            <ComboBox Grid.Column="0"
+                      ItemsSource="{Binding BuffSets}"
+                      SelectedItem="{Binding SelectedBuffSet, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      ToolTip.Tip="Aktywny zestaw buffów">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="models:BuffSetEntry">
+                  <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Grid.Column="1"
+                    Content="RZUĆ BRAKUJĄCE"
+                    Classes="mud-small"
+                    ToolTip.Tip="/recast działa na aktualnie wybranym zestawie"
+                    Command="{Binding RecastBuffsCommand}" />
+          </Grid>
 
-        <ItemsControl Name="BuffsItemsControl"
-                      ItemsSource="{Binding RequiredBuffs}"
-                      PointerMoved="BuffsItemsControl_OnPointerMoved">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:BuffWatchEntry">
-              <Border Classes="pulsing-host"
-                      Classes.pulsing="{Binding IsEnding}"
-                      Margin="0,1"
-                      DragDrop.AllowDrop="True"
-                      DragDrop.DragOver="BuffRow_OnDragOver"
-                      DragDrop.Drop="BuffRow_OnDrop">
-                <Grid ColumnDefinitions="Auto,*">
-                  <TextBlock Grid.Column="0" Text="⠿"
-                             Classes="mud-faint"
-                             FontSize="14"
-                             VerticalAlignment="Center"
-                             Margin="2,0,4,0"
-                             Cursor="SizeAll"
-                             ToolTip.Tip="Przeciągnij, aby zmienić kolejność"
-                             PointerPressed="BuffDragHandle_OnPointerPressed" />
-                  <Grid Grid.Column="1">
-                    <Button BorderBrush="{StaticResource MudBrushEmerald}"
-                            Background="Transparent"
-                            BorderThickness="1" CornerRadius="3"
-                            Padding="6,3"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            Cursor="Hand"
-                            ToolTip.Tip="Rzuć ten spell"
-                            IsVisible="{Binding IsActive}"
-                            Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
-                            CommandParameter="{Binding}">
-                      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
-                        <TextBlock Text="[+]"
-                                   Foreground="{StaticResource MudBrushEmeraldBright}"
-                                   Margin="0,0,6,0" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding Name}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
-                                   IsVisible="{Binding HasCircle}"
-                                   Classes="mud-faint" Margin="0,0,6,0"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="mem"
-                                   FontSize="10"
-                                   Margin="0,0,6,0" VerticalAlignment="Center"
-                                   ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
-                                   Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
-                        <Button Grid.Column="4" Content="✕" Classes="mud-small"
-                                Padding="6,1"
-                                ToolTip.Tip="Usuń z zestawu"
-                                Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"
-                                CommandParameter="{Binding}" />
-                      </Grid>
-                    </Button>
+          <TextBlock Classes="mud-faint"
+                     Text="Ten zestaw jest pusty."
+                     HorizontalAlignment="Center"
+                     Margin="6,8"
+                     IsVisible="{Binding !RequiredBuffs.Count}" />
 
-                    <Button BorderBrush="{StaticResource MudBrushCrimson}"
-                            Background="{StaticResource MudBrushStoneLight}"
-                            BorderThickness="1" CornerRadius="3"
-                            Padding="6,3"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            Cursor="Hand"
-                            ToolTip.Tip="Rzuć ten spell"
-                            IsVisible="{Binding !IsActive}"
-                            Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
-                            CommandParameter="{Binding}">
-                      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
-                        <TextBlock Text="[!]"
-                                   Foreground="{StaticResource MudBrushCrimsonBright}"
-                                   Margin="0,0,6,0" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding Name}"
-                                   Foreground="{StaticResource MudBrushCrimsonBright}"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
-                                   IsVisible="{Binding HasCircle}"
-                                   Classes="mud-faint" Margin="0,0,6,0"
-                                   VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="mem"
-                                   FontSize="10"
-                                   Margin="0,0,6,0" VerticalAlignment="Center"
-                                   ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
-                                   Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
-                        <TextBlock Grid.Column="4" Text="brak"
-                                   Classes="mud-faint" Margin="0,0,6,0"
-                                   VerticalAlignment="Center" />
-                        <Button Grid.Column="5" Content="✕" Classes="mud-small"
-                                Padding="6,1"
-                                ToolTip.Tip="Usuń z zestawu"
-                                Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"
-                                CommandParameter="{Binding}" />
-                      </Grid>
-                    </Button>
+          <!-- Rows follow DisplayedBuffs (attention-first when that setting is on); a drag moves the
+               buff within RequiredBuffs, the saved order. -->
+          <ItemsControl Name="BuffsItemsControl"
+                        ItemsSource="{Binding DisplayedBuffs}"
+                        PointerMoved="BuffsItemsControl_OnPointerMoved">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:BuffWatchEntry">
+                <Border Classes="pulsing-host"
+                        Classes.pulsing="{Binding IsEnding}"
+                        Margin="0,1"
+                        DragDrop.AllowDrop="True"
+                        DragDrop.DragOver="BuffRow_OnDragOver"
+                        DragDrop.Drop="BuffRow_OnDrop">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Grid.Column="0" Text="⠿"
+                               Classes="mud-faint"
+                               FontSize="14"
+                               VerticalAlignment="Center"
+                               Margin="2,0,4,0"
+                               Cursor="SizeAll"
+                               ToolTip.Tip="Przeciągnij, aby zmienić kolejność"
+                               PointerPressed="BuffDragHandle_OnPointerPressed" />
+                    <Grid Grid.Column="1">
+                      <Button BorderBrush="{StaticResource MudBrushEmerald}"
+                              Background="Transparent"
+                              BorderThickness="1" CornerRadius="3"
+                              Padding="6,3"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Cursor="Hand"
+                              ToolTip.Tip="Rzuć ten spell"
+                              IsVisible="{Binding IsActive}"
+                              Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
+                              CommandParameter="{Binding}">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                          <TextBlock Text="[+]"
+                                     Foreground="{StaticResource MudBrushEmeraldBright}"
+                                     Margin="0,0,6,0" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding Name}"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
+                                     IsVisible="{Binding HasCircle}"
+                                     Classes="mud-faint" Margin="0,0,6,0"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="3" Text="mem"
+                                     FontSize="10"
+                                     Margin="0,0,6,0" VerticalAlignment="Center"
+                                     ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
+                                     Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
+                          <Button Grid.Column="4" Content="✕" Classes="mud-small"
+                                  Padding="6,1"
+                                  ToolTip.Tip="Usuń z zestawu"
+                                  Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"
+                                  CommandParameter="{Binding}" />
+                        </Grid>
+                      </Button>
+
+                      <Button BorderBrush="{StaticResource MudBrushCrimson}"
+                              Background="{StaticResource MudBrushStoneLight}"
+                              BorderThickness="1" CornerRadius="3"
+                              Padding="6,3"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Cursor="Hand"
+                              ToolTip.Tip="Rzuć ten spell"
+                              IsVisible="{Binding !IsActive}"
+                              Command="{Binding $parent[UserControl].DataContext.RecastSingleBuffCommand}"
+                              CommandParameter="{Binding}">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+                          <TextBlock Text="[!]"
+                                     Foreground="{StaticResource MudBrushCrimsonBright}"
+                                     Margin="0,0,6,0" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding Name}"
+                                     Foreground="{StaticResource MudBrushCrimsonBright}"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Text="{Binding CircleDisplay}"
+                                     IsVisible="{Binding HasCircle}"
+                                     Classes="mud-faint" Margin="0,0,6,0"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="3" Text="mem"
+                                     FontSize="10"
+                                     Margin="0,0,6,0" VerticalAlignment="Center"
+                                     ToolTip.Tip="Czy ten czar jest teraz zapamiętany (mem)"
+                                     Foreground="{Binding IsMemorized, Converter={x:Static conv:MemorizedIndicatorForegroundConverter.Instance}}" />
+                          <TextBlock Grid.Column="4" Text="brak"
+                                     Classes="mud-faint" Margin="0,0,6,0"
+                                     VerticalAlignment="Center" />
+                          <Button Grid.Column="5" Content="✕" Classes="mud-small"
+                                  Padding="6,1"
+                                  ToolTip.Tip="Usuń z zestawu"
+                                  Command="{Binding $parent[UserControl].DataContext.DeleteBuffCommand}"
+                                  CommandParameter="{Binding}" />
+                        </Grid>
+                      </Button>
+                    </Grid>
                   </Grid>
-                </Grid>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
       </StackPanel>
 
       <!-- Zapamiętane zaklęcia (live from Char.MemSpell GMCP) — hidden entirely when "Pokaż mem"
            is off (see ShowMemSpellSlots), for someone who only cares about Kondycja/Buffy. -->
       <StackPanel Spacing="2" IsVisible="{Binding ShowMemSpellSlots}">
-        <TextBlock Classes="mud-heading" Text="Zapamiętane zaklęcia" />
-        <TextBlock Classes="mud-faint" TextWrapping="Wrap"
-                   Text="Brak zapamiętanych zaklęć."
-                   IsVisible="{Binding !MemSpells.Count}" />
-        <ItemsControl ItemsSource="{Binding MemSpells}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="models:MemSpellCircle">
-              <!-- Everything for one Krąg on a single flowing line — WrapPanel only breaks to a
-                   second line if the content genuinely doesn't fit, maximizing how many circles
-                   are visible at once instead of spending up to 4 lines per circle. -->
-              <Border Classes="mud-section" Padding="6,3" Margin="0,1">
-                <WrapPanel>
-                  <TextBlock Text="{Binding Header}"
-                             FontWeight="Bold"
-                             Foreground="{StaticResource MudBrushArcaneBlueBright}"
-                             Margin="0,0,4,0" />
-                  <TextBlock Text="{Binding CountDisplay}"
-                             Classes="mud-faint"
-                             Margin="0,0,8,0" />
-                  <TextBlock Text="{Binding MemedDisplay}"
-                             IsVisible="{Binding HasMemed}"
-                             Margin="0,0,8,0"
-                             ToolTip.Tip="Zapamiętane" />
-                  <TextBlock Text="{Binding MemingDisplay}"
-                             Foreground="{StaticResource MudBrushGoldBright}"
-                             IsVisible="{Binding HasMeming}"
-                             Margin="0,0,8,0"
-                             ToolTip.Tip="W trakcie zapamiętywania" />
-                  <TextBlock Text="{Binding UnmemedDisplay}"
-                             Foreground="{StaticResource MudBrushCrimsonBright}"
-                             IsVisible="{Binding HasUnmemed}"
-                             ToolTip.Tip="Rzucone / niezapamiętane" />
-                </WrapPanel>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <Button Classes="section-toggle"
+                Command="{Binding ToggleMemSectionCommand}"
+                CommandParameter="Mem">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="▾" IsVisible="{Binding IsMemSectionOpen}" />
+            <TextBlock Text="▸" IsVisible="{Binding !IsMemSectionOpen}" />
+            <TextBlock Classes="mud-heading" Text="Zapamiętane zaklęcia" />
+          </StackPanel>
+        </Button>
+        <StackPanel Spacing="2" IsVisible="{Binding IsMemSectionOpen}">
+          <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                     Text="Brak zapamiętanych zaklęć."
+                     IsVisible="{Binding !MemSpells.Count}" />
+          <ItemsControl ItemsSource="{Binding MemSpells}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:MemSpellCircle">
+                <!-- Everything for one Krąg on a single flowing line — WrapPanel only breaks to a
+                     second line if the content genuinely doesn't fit. -->
+                <Border Classes="mud-section" Padding="6,3" Margin="0,1">
+                  <WrapPanel>
+                    <TextBlock Text="{Binding Header}"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource MudBrushArcaneBlueBright}"
+                               Margin="0,0,4,0" />
+                    <TextBlock Text="{Binding CountDisplay}"
+                               Classes="mud-faint"
+                               Margin="0,0,8,0" />
+                    <TextBlock Text="{Binding MemedDisplay}"
+                               IsVisible="{Binding HasMemed}"
+                               Margin="0,0,8,0"
+                               ToolTip.Tip="Zapamiętane" />
+                    <TextBlock Text="{Binding MemingDisplay}"
+                               Foreground="{StaticResource MudBrushGoldBright}"
+                               IsVisible="{Binding HasMeming}"
+                               Margin="0,0,8,0"
+                               ToolTip.Tip="W trakcie zapamiętywania" />
+                    <TextBlock Text="{Binding UnmemedDisplay}"
+                               Foreground="{StaticResource MudBrushCrimsonBright}"
+                               IsVisible="{Binding HasUnmemed}"
+                               ToolTip.Tip="Rzucone / niezapamiętane" />
+                  </WrapPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
       </StackPanel>
     </StackPanel>
   </ScrollViewer>

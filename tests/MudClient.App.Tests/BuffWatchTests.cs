@@ -326,6 +326,57 @@ public sealed class BuffWatchTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task DisplayedBuffs_AttentionFirst_ListsMissingThenEndingThenTheRest_KeepingSavedOrder()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        foreach (var name in new[] { "armor", "bless", "sanctuary" })
+        {
+            viewModel.NewBuffName = name;
+            viewModel.AddBuffCommand.Execute(null);
+        }
+
+        // armor active and fine, sanctuary active but ending, bless missing.
+        RaiseAffectsChanged(
+            viewModel,
+            new CharacterAffect("armor", "", Negative: false, Ending: false, ExtraValue: null),
+            new CharacterAffect("sanctuary", "", Negative: false, Ending: true, ExtraValue: null));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(viewModel.BuffAttentionFirstEnabled);
+        Assert.Equal(["bless", "sanctuary", "armor"], viewModel.DisplayedBuffs.Select(buff => buff.Name));
+        Assert.Equal(["armor", "bless", "sanctuary"], viewModel.RequiredBuffs.Select(buff => buff.Name));
+    }
+
+    [AvaloniaFact]
+    public async Task DisplayedBuffs_AttentionOff_FollowsSavedOrder()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        foreach (var name in new[] { "armor", "bless" })
+        {
+            viewModel.NewBuffName = name;
+            viewModel.AddBuffCommand.Execute(null);
+        }
+
+        viewModel.BuffAttentionFirstEnabled = false;
+
+        Assert.Equal(["armor", "bless"], viewModel.DisplayedBuffs.Select(buff => buff.Name));
+    }
+
+    [AvaloniaFact]
+    public async Task ToggleMemSection_CollapsesAndReopensTheSection()
+    {
+        await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));
+        Assert.True(viewModel.IsMemSectionOpen);
+
+        viewModel.ToggleMemSectionCommand.Execute("Mem");
+        Assert.False(viewModel.IsMemSectionOpen);
+        Assert.True(viewModel.IsBuffySectionOpen);
+
+        viewModel.ToggleMemSectionCommand.Execute("Mem");
+        Assert.True(viewModel.IsMemSectionOpen);
+    }
+
+    [AvaloniaFact]
     public async Task ShowMemSpellSlots_DefaultsOnAndPersistsToggle()
     {
         await using var viewModel = new MainWindowViewModel(CreateService(), new AppSettingsService(_directory));

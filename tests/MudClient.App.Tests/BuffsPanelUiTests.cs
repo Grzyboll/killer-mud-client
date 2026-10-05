@@ -102,8 +102,11 @@ public sealed class BuffsPanelUiTests
             new AppSettingsService(directory),
             new DockLayoutService(directory),
             layoutPresetService: new LayoutPresetService(directory));
-        viewModel.RequiredBuffs.Add(new BuffWatchEntry("armor") { IsActive = true });
-        viewModel.RequiredBuffs.Add(new BuffWatchEntry("sanctuary"));
+        // Added through the command, like the UI does — it's what refreshes DisplayedBuffs.
+        viewModel.NewBuffName = "armor";
+        viewModel.AddBuffCommand.Execute(null);
+        viewModel.NewBuffName = "sanctuary";
+        viewModel.AddBuffCommand.Execute(null);
         var window = new MainWindow
         {
             Width = 1400,
@@ -133,7 +136,7 @@ public sealed class BuffsPanelUiTests
                     && ToolTip.GetTip(button)?.ToString() == "Rzuć ten spell")
                 .ToList();
             var buffList = panel.GetVisualDescendants().OfType<ItemsControl>()
-                .Single(control => ReferenceEquals(control.ItemsSource, viewModel.RequiredBuffs));
+                .Single(control => ReferenceEquals(control.ItemsSource, viewModel.DisplayedBuffs));
             var setSelector = panel.GetVisualDescendants().OfType<ComboBox>()
                 .Single(control => ReferenceEquals(control.ItemsSource, viewModel.BuffSets));
 

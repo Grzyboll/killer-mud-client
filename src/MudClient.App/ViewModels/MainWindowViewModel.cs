@@ -560,6 +560,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         GoToDeathCommand = new RelayCommand<DeathMarkEntry>(GoToDeath);
         AddBuffCommand = new RelayCommand(AddBuff, () => !string.IsNullOrWhiteSpace(NewBuffName));
         DeleteBuffCommand = new RelayCommand<BuffWatchEntry>(DeleteBuff);
+        ToggleMemSectionCommand = new RelayCommand<string>(ToggleMemSection);
         CreateBuffSetCommand = new RelayCommand(CreateBuffSet, () => !string.IsNullOrWhiteSpace(NewBuffSetName));
         RenameBuffSetCommand = new RelayCommand(RenameSelectedBuffSet, () =>
             SelectedBuffSet is not null && !string.IsNullOrWhiteSpace(BuffSetNameDraft));
@@ -3168,6 +3169,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoRecastOnLeaderSnapCommandsText));
         OnPropertyChanged(nameof(ShowExtendedEffects));
         OnPropertyChanged(nameof(ShowMemSpellSlots));
+        OnPropertyChanged(nameof(BuffAttentionFirstEnabled));
+        NotifyMemSectionState();
         OnPropertyChanged(nameof(AutowalkMovementRecoveryEnabled));
         OnPropertyChanged(nameof(AutowalkRestOnArrivalEnabled));
         OnPropertyChanged(nameof(AutoStandOrderEnabled));
@@ -6773,9 +6776,84 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void RefreshBuffIndicators()
     {
+        RefreshDisplayedBuffs();
         OnPropertyChanged(nameof(BuffsBadge));
         OnPropertyChanged(nameof(BuffsAlert));
         UpdateMemToolTitle();
+    }
+
+    /// <summary>The watched buffs in the order Buffy shows them. Equal to <see cref="RequiredBuffs"/>
+    /// unless <see cref="BuffAttentionFirstEnabled"/> is on, which lifts missing buffs and then
+    /// ending ones to the top (a stable sort, so the saved order is kept within each group). Rebuilt
+    /// by <see cref="RefreshBuffIndicators"/> and <see cref="MoveBuff"/> rather than live, so it's a
+    /// snapshot of the moment of the last change.</summary>
+    public ObservableCollection<BuffWatchEntry> DisplayedBuffs { get; } = [];
+
+    public bool BuffAttentionFirstEnabled
+    {
+        get => _profileSettings.BuffAttentionFirstEnabled;
+        set
+        {
+            if (_profileSettings.BuffAttentionFirstEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.BuffAttentionFirstEnabled = value;
+            OnPropertyChanged();
+            RefreshDisplayedBuffs();
+            SaveActiveProfile();
+        }
+    }
+
+    private void RefreshDisplayedBuffs()
+    {
+        IEnumerable<BuffWatchEntry> ordered = BuffAttentionFirstEnabled
+            ? RequiredBuffs.OrderBy(AttentionRank)
+            : RequiredBuffs;
+        DisplayedBuffs.Clear();
+        foreach (var buff in ordered)
+        {
+            DisplayedBuffs.Add(buff);
+        }
+    }
+
+    private static int AttentionRank(BuffWatchEntry buff) => !buff.IsActive ? 0 : buff.IsEnding ? 1 : 2;
+
+    public RelayCommand<string> ToggleMemSectionCommand { get; }
+
+    /// <summary>Toggles one Mem panel section between open and collapsed, and persists it.</summary>
+    private void ToggleMemSection(string? sectionId)
+    {
+        if (string.IsNullOrEmpty(sectionId))
+        {
+            return;
+        }
+
+        var collapsed = _profileSettings.CollapsedMemPanelSections;
+        if (!collapsed.Remove(sectionId))
+        {
+            collapsed.Add(sectionId);
+        }
+
+        NotifyMemSectionState();
+        SaveActiveProfile();
+    }
+
+    public bool IsKondycjaSectionOpen => !IsMemSectionCollapsed("Kondycja");
+    public bool IsEfektySectionOpen => !IsMemSectionCollapsed("Efekty");
+    public bool IsBuffySectionOpen => !IsMemSectionCollapsed("Buffy");
+    public bool IsMemSectionOpen => !IsMemSectionCollapsed("Mem");
+
+    private bool IsMemSectionCollapsed(string sectionId) =>
+        _profileSettings.CollapsedMemPanelSections.Contains(sectionId);
+
+    private void NotifyMemSectionState()
+    {
+        OnPropertyChanged(nameof(IsKondycjaSectionOpen));
+        OnPropertyChanged(nameof(IsEfektySectionOpen));
+        OnPropertyChanged(nameof(IsBuffySectionOpen));
+        OnPropertyChanged(nameof(IsMemSectionOpen));
     }
 
     /// <summary>
@@ -6967,6 +7045,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         buffs.Move(oldIndex, newIndex);
+        RefreshDisplayedBuffs();
         SaveActiveProfile();
     }
 
@@ -10507,6 +10586,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             () => ShowExtendedEffects, v => ShowExtendedEffects = v),
         new("showmemslots", "Pokaż mem", "Lista zapamiętanych zaklęć wg kręgu w panelu Mem.",
             () => ShowMemSpellSlots, v => ShowMemSpellSlots = v),
+        new("buffattention", "Brakujące buffy na górze", "Brakujące i kończące się buffy na początku listy Buffy.",
+            () => BuffAttentionFirstEnabled, v => BuffAttentionFirstEnabled = v),
         new("chatsound", "Dźwięk czatu", "Krótki dźwięk przy nowej wiadomości na czacie.",
             () => ChatSoundOnNewMessageEnabled, v => ChatSoundOnNewMessageEnabled = v),
         new("timersbar", "Timery na pasku", "Pasek aktywnych timerów nad polem komend.",

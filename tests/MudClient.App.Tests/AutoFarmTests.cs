@@ -1783,4 +1783,114 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // KickAutoFarmIfStuck / PushAutoFarmVisitedRoomIds — stuck-farm watchdog
+    // ====================================================================
+
+    [AvaloniaFact]
+    public async Task PushAutoFarmVisitedRoomIds_StampsLastProgressTimestamp()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var before = DateTimeOffset.UtcNow;
+            InvokePrivate(viewModel, "PushAutoFarmVisitedRoomIds");
+
+            var stamped = GetPrivateField<DateTimeOffset?>(viewModel, "_autoFarmLastProgressAt");
+            Assert.NotNull(stamped);
+            Assert.True(stamped >= before);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task KickAutoFarmIfStuck_NotActive_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmLastProgressAt", DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
+
+            viewModel.KickAutoFarmIfStuck();
+
+            Assert.DoesNotContain(viewModel.Toasts, toast => toast.Text.Contains("pauza i wznowienie"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task KickAutoFarmIfStuck_RecentProgress_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmLastProgressAt", DateTimeOffset.UtcNow);
+
+            viewModel.KickAutoFarmIfStuck();
+
+            Assert.DoesNotContain(viewModel.Toasts, toast => toast.Text.Contains("pauza i wznowienie"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task KickAutoFarmIfStuck_AlreadyPaused_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmPaused", true);
+            SetPrivateField(viewModel, "_autoFarmLastProgressAt", DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
+
+            viewModel.KickAutoFarmIfStuck();
+
+            Assert.DoesNotContain(viewModel.Toasts, toast => toast.Text.Contains("pauza i wznowienie"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task KickAutoFarmIfStuck_StuckPastThreshold_PausesAndResumes()
+    {
+        // Mirrors the manual workaround (pause, then resume) the user already relies on to
+        // unstick a wedged farm — this just does it automatically after the farm goes a full
+        // threshold without visiting a new room.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmLastProgressAt", DateTimeOffset.UtcNow - TimeSpan.FromSeconds(61));
+
+            viewModel.KickAutoFarmIfStuck();
+
+            Assert.Contains(viewModel.Toasts, toast => toast.Text.Contains("pauza i wznowienie"));
+            // ResumeAutoFarm clears the pause flag straight back, even though the ContinueAutoFarm
+            // call it triggers then stops the farm for lacking map data in this bare-bones setup.
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

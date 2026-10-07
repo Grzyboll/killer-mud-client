@@ -88,6 +88,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <see cref="StopAutoFarm"/>, so a stale delayed resume can't un-pause a farm that was stopped
     /// or paused again for an unrelated reason in the meantime.</summary>
     private CancellationTokenSource? _autoFarmPrayerPauseCts;
+    /// <summary>Set by <see cref="PushAutoFarmVisitedRoomIds"/> (every time a room is actually
+    /// credited as visited) — the signal <see cref="KickAutoFarmIfStuck"/> compares against to
+    /// tell real progress apart from a farm that's wedged mid-walk.</summary>
+    private DateTimeOffset? _autoFarmLastProgressAt;
+    /// <summary>How long auto-farm can go without visiting a new room before
+    /// <see cref="KickAutoFarmIfStuck"/> pauses and resumes it — a field (not a const) so tests
+    /// can shrink it. Mirrors the manual pause-then-resume the user already does to unstick a
+    /// wedged farm (a locked gate, a missed move, ...); doing it automatically after this long
+    /// means a farm left running unattended doesn't just sit still.</summary>
+    private TimeSpan _autoFarmStuckThreshold = TimeSpan.FromSeconds(60);
+    private CancellationTokenSource? _autoFarmWatchdogCts;
     private readonly AutoAssistPolicy _autoAssist = new();
     private readonly GroupExhaustionRefreshPolicy _groupExhaustionRefresh = new();
     private readonly ProfileService _profiles;
@@ -5749,6 +5760,10 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         PushAutoFarmVisitedRoomIds();
         RefreshCommands();
         AddToast("Farma uruchomiona.", "info");
+        _autoFarmWatchdogCts?.Cancel();
+        var watchdogCts = new CancellationTokenSource();
+        _autoFarmWatchdogCts = watchdogCts;
+        _ = RunAutoFarmStuckWatchdogAsync(watchdogCts.Token);
         ContinueAutoFarm();
     }
 
@@ -5773,6 +5788,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _autoFarmSessionExcludedRoomIds = [];
         _autoFarmHealOrderSent = false;
         _autoFarmPrayerPauseCts?.Cancel();
+        _autoFarmWatchdogCts?.Cancel();
+        _autoFarmLastProgressAt = null;
 
         if (_autowalkPath is not null)
         {
@@ -5824,9 +5841,58 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Mirrors <see cref="_autoFarmVisitedRoomIds"/> onto <see cref="Map"/> as a fresh
-    /// snapshot so the map can color every visited room yellow while the farm runs.</summary>
-    private void PushAutoFarmVisitedRoomIds() =>
+    /// snapshot so the map can color every visited room yellow while the farm runs. Also stamps
+    /// <see cref="_autoFarmLastProgressAt"/> — every call site marks a room as actually visited,
+    /// which is exactly the "the farm is still moving" signal <see cref="KickAutoFarmIfStuck"/>
+    /// watches.</summary>
+    private void PushAutoFarmVisitedRoomIds()
+    {
         Map.AutoFarmVisitedRoomIds = new HashSet<int>(_autoFarmVisitedRoomIds);
+        _autoFarmLastProgressAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Polls, roughly every tenth of <see cref="_autoFarmStuckThreshold"/>, whether the
+    /// farm has gone that long without visiting a new room — see <see cref="KickAutoFarmIfStuck"/>.
+    /// Cancelled by <see cref="StopAutoFarm"/> or by the next <see cref="StartAutoFarm"/>, so only
+    /// one of these ever runs per farm session.</summary>
+    private async Task RunAutoFarmStuckWatchdogAsync(CancellationToken cancellationToken)
+    {
+        var pollInterval = _autoFarmStuckThreshold / 10;
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(pollInterval, cancellationToken);
+                Dispatcher.UIThread.Post(KickAutoFarmIfStuck);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>Pauses then immediately resumes auto-farm once it's gone <see cref="_autoFarmStuckThreshold"/>
+    /// without visiting a new room — the same manual pause-then-resume the user already does to
+    /// unstick a wedged walk (a locked gate, a missed move, a companion blocking the room, ...),
+    /// just automatic. A no-op while the farm isn't running, is already paused for another reason,
+    /// or has made progress recently.</summary>
+    internal void KickAutoFarmIfStuck()
+    {
+        if (!_autoFarmActive || _autoFarmPaused || _autoFarmLastProgressAt is not { } lastProgress ||
+            DateTimeOffset.UtcNow - lastProgress < _autoFarmStuckThreshold)
+        {
+            return;
+        }
+
+        // Stamped here too, not just by the resulting PushAutoFarmVisitedRoomIds call (which only
+        // happens once the farm actually reaches a new room) — otherwise a resume that's still
+        // stuck would trip this again on literally the next poll instead of waiting out a fresh
+        // threshold.
+        _autoFarmLastProgressAt = DateTimeOffset.UtcNow;
+        AddToast($"Farma nie posunęła się od {_autoFarmStuckThreshold.TotalSeconds:0} s — pauza i wznowienie.", "info");
+        PauseAutoFarm();
+        ResumeAutoFarm();
+    }
 
     /// <summary>Rooms auto-farm must route around right now: the player's own manually-placed
     /// markers (<see cref="MapViewModel.AutoFarmExcludedRoomIds"/> — "X"/"#"/"!"/"!!", permanent)

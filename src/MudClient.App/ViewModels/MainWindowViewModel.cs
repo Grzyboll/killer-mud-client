@@ -350,7 +350,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     // seconds after a step was sent, try the same generic door-opening commands
     // AutowalkRecoveryPolicy already uses for a recognized locked gate, then give up and exclude
     // the room rather than hang indefinitely.
-    private static readonly TimeSpan AutowalkStuckStepTimeout = TimeSpan.FromSeconds(8);
+    /// <summary>Not a const so tests can shrink it instead of waiting out the real default — see
+    /// <see cref="MonitorAutowalkStepStuckAsync"/>/<see cref="MonitorGateTimeoutAsync"/>.</summary>
+    private TimeSpan AutowalkStuckStepTimeout = TimeSpan.FromSeconds(8);
     private int _autowalkStuckRecoveryAttempts;
     private const int MaxAutowalkStuckRecoveryAttempts = 2;
 
@@ -11846,12 +11848,64 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
                 _autowalkGateCommandsSent = true;
                 TryContinueThroughOpenedGate();
+                if (_autowalkWaitingForGate)
+                {
+                    // Still not open — zapukaj/pull/pociągnij/uderz didn't work (a permanently
+                    // locked gate, or one that needs a command this list doesn't have). Give GMCP
+                    // one more grace window, then fall through to the normal stuck-step recovery
+                    // instead of waiting here forever — see MonitorGateTimeoutAsync.
+                    _ = MonitorGateTimeoutAsync(_autowalkStep, cancellationToken);
+                }
             });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The autowalk was stopped while the gate sequence was being sent.
         }
+    }
+
+    /// <summary>Backstop for a gate that the knock/pull/hit sequence (<see cref="SendGateCommandsAsync"/>)
+    /// never actually opened — <see cref="HandleAutowalkStepStuck"/> explicitly defers to
+    /// <see cref="_autowalkWaitingForGate"/> staying armed, on the assumption that something else
+    /// (this method, or <see cref="OnAutowalkCombatEnded"/> after a mid-sequence fight) owns
+    /// resolving it. Without this, a gate that never reports open in GMCP left the walk — and
+    /// auto-farm/Autofollow on top of it — stuck indefinitely with no escape, since
+    /// <see cref="MonitorAutowalkStepStuckAsync"/> only ever fires once per step. After one more
+    /// <see cref="AutowalkStuckStepTimeout"/> of silence with the gate still unconfirmed, gives up
+    /// waiting and hands off to the same escalating stuck-step recovery a plain unresponsive move
+    /// already gets (retry, then eventually exclude the room and reroute).</summary>
+    private async Task MonitorGateTimeoutAsync(int step, CancellationToken cancellationToken)
+    {
+        var monitorStartedAtUtc = DateTimeOffset.UtcNow;
+        try
+        {
+            while (true)
+            {
+                var remaining = GetRemainingStuckWait(
+                    DateTimeOffset.UtcNow, monitorStartedAtUtc, _lastOutgoingCommandAtUtc, AutowalkStuckStepTimeout);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+
+                await Task.Delay(remaining, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (cancellationToken.IsCancellationRequested || !_autowalkWaitingForGate || _autowalkGateIsOpen)
+            {
+                return;
+            }
+
+            _autowalkWaitingForGate = false;
+            HandleAutowalkStepStuck(step, cancellationToken);
+        });
     }
 
     /// <summary>

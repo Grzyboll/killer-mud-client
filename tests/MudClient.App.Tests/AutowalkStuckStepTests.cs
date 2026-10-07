@@ -699,4 +699,125 @@ public sealed class AutowalkStuckStepTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // MonitorGateTimeoutAsync — backstop for a gate the knock/pull/hit sequence never actually
+    // opened (GMCP never reports the exit unblocked), which previously left autowalk waiting
+    // forever since HandleAutowalkStepStuck defers to _autowalkWaitingForGate staying armed.
+    // ====================================================================
+
+    [AvaloniaFact]
+    public async Task MonitorGateTimeoutAsync_GateStillClosedAfterTimeout_FallsThroughToStuckRecovery()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_autowalkStuckRecoveryAttempts", 0);
+            SetPrivateField(viewModel, "_autowalkWaitingForGate", true);
+            SetPrivateField(viewModel, "_autowalkGateCommandsSent", true);
+            SetPrivateField(viewModel, "_autowalkGateIsOpen", false);
+            SetPrivateField(viewModel, "AutowalkStuckStepTimeout", TimeSpan.FromMilliseconds(5));
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autowalkCts");
+
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("MonitorGateTimeoutAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [0, cts.Token])!;
+            await task;
+            Dispatcher.UIThread.RunJobs();
+
+            // The gate wait is given up on and the step falls through to the normal stuck-step
+            // backstop — same outcome HandleAutowalkStepStuck_BelowMaxAttempts_... asserts for a
+            // plain unresponsive move.
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkWaitingForGate"));
+            Assert.Equal(1, GetPrivateField<int>(viewModel, "_autowalkStuckRecoveryAttempts"));
+            Assert.True(viewModel.IsAutowalking);
+            Assert.DoesNotContain(2, viewModel.Map.AutoFarmExcludedRoomIds);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task MonitorGateTimeoutAsync_GateOpenedBeforeTimeout_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            var from = CreateRoom(1, "1");
+            var to = CreateRoom(2, "2");
+            ArrangeSingleStepWalk(viewModel, from, to);
+            SetPrivateField(viewModel, "_autowalkStuckRecoveryAttempts", 0);
+            // Simulates TryContinueThroughOpenedGate already having resolved the wait (GMCP
+            // reported the exit open) by the time this fires.
+            SetPrivateField(viewModel, "_autowalkWaitingForGate", false);
+            SetPrivateField(viewModel, "AutowalkStuckStepTimeout", TimeSpan.FromMilliseconds(5));
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autowalkCts");
+
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("MonitorGateTimeoutAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [0, cts.Token])!;
+            await task;
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(0, GetPrivateField<int>(viewModel, "_autowalkStuckRecoveryAttempts"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task MonitorGateTimeoutAsync_ExceedsMaxAttempts_ExcludesRoomAndKeepsFarmGoing()
+    {
+        // End-to-end: a gate that never opens, during auto-farm, must eventually be routed around
+        // instead of stranding the farm at the region boundary forever — same outcome as
+        // HandleAutowalkStepStuck_ExceedsMaxAttemptsDuringAutoFarm_RoutesAroundExcludedRoomAndKeepsGoing,
+        // just reached via a gate that never reports open instead of a plain unresponsive move.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            ArrangeThreeRoomFarm(viewModel);
+            var index = viewModel.Map.MapIndex!;
+            var room1 = index.FindFirstRoomByVnum("1")!;
+            var room2 = index.FindFirstRoomByVnum("2")!;
+
+            ArrangeSingleStepWalk(viewModel, room1, room2);
+            SetPrivateField(viewModel, "_autowalkStuckRecoveryAttempts", GetMaxStuckRecoveryAttempts());
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmVisitedRoomIds", new HashSet<int> { room1.Id });
+            SetPrivateField(viewModel, "_autowalkWaitingForGate", true);
+            SetPrivateField(viewModel, "_autowalkGateCommandsSent", true);
+            SetPrivateField(viewModel, "_autowalkGateIsOpen", false);
+            SetPrivateField(viewModel, "AutowalkStuckStepTimeout", TimeSpan.FromMilliseconds(5));
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autowalkCts");
+
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("MonitorGateTimeoutAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [0, cts.Token])!;
+            await task;
+            Dispatcher.UIThread.RunJobs();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.IsAutoFarmActive);
+            Assert.False(GetPrivateField<bool>(viewModel, "_autowalkWaitingForGate"));
+            Assert.Contains(room2.Id, GetPrivateField<HashSet<int>>(viewModel, "_autoFarmSessionExcludedRoomIds"));
+
+            var newPath = GetPrivateField<MapPath?>(viewModel, "_autowalkPath");
+            Assert.NotNull(newPath);
+            Assert.Equal("3", newPath!.To.Vnum);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

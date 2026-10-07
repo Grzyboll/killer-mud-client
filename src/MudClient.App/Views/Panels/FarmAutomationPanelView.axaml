@@ -144,7 +144,7 @@
         </StackPanel>
       </Border>
 
-      <TextBlock Classes="mud-heading" Text="Jedzenie, picie i modlitwa" Margin="0,6,0,0" />
+      <TextBlock Classes="mud-heading" Text="Jedzenie, picie, modlitwa i sen" Margin="0,6,0,0" />
       <Border Classes="mud-section" Padding="10">
         <StackPanel Spacing="10">
           <StackPanel Spacing="3">
@@ -171,6 +171,13 @@
                        Text="GMCP nie zgłasza żadnego stanu „wiara słabnie” — ta umiejętność (np. „holy prayer”) działa tak jak inne umiejętności z odnowieniem (smite evil, lay on hands): gdy tylko znów można jej użyć, klient wysyła „pray”, a jeśli farma jest akurat uruchomiona — na chwilę ją wstrzymuje, żeby modlitwy nie przerwało chodzenie czy walka, i wznawia ją sama po krótkiej pauzie." />
             <TextBox Text="{Binding AutoFarmPrayerSkillName, UpdateSourceTrigger=PropertyChanged}"
                      PlaceholderText="Nazwa umiejętności, np. holy prayer" />
+          </StackPanel>
+
+          <StackPanel Spacing="3">
+            <CheckBox IsChecked="{Binding AutoFarmSleepOnSleepyEnabled}"
+                      Content="Automatyczny sen — połóż się spać na 2h (w grze), gdy GMCP zgłosi Senność" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Gdy GMCP zgłosi stan „Senność” (patrz panel Warunki): wysyła „sleep”, a jeśli farma jest akurat uruchomiona — wstrzymuje ją. Odlicza 2 godziny w czasie gry (Mud.TimeInfo), nie czasu rzeczywistego, po czym wysyła „stand” i wznawia farmę. Działa niezależnie od tego, czy farma jest uruchomiona." />
           </StackPanel>
         </StackPanel>
       </Border>

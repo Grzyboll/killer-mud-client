@@ -2022,4 +2022,215 @@ public sealed class AutoFarmTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    // ====================================================================
+    // TryAutoFarmSleepOnSleepy / TryAdvanceAutoFarmSleep — "Automatyczny sen" (Auto: Farma)
+    // ====================================================================
+
+    private static CharacterConditionUpdate SleepyCondition() => new(
+        Position: null,
+        Flags: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["sleepy"] = true });
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSleepOnSleepy_Sleepy_SendsSleepAndPausesFarm()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("sleep"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmSleepPending"));
+            Assert.Equal(2, GetPrivateField<int>(viewModel, "_autoFarmSleepHoursRemaining"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSleepOnSleepy_Disabled_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmSleepPending"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAutoFarmSleepOnSleepy_AlreadyPending_DoesNotResendSleep()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(output, line => line.Contains("sleep"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAdvanceAutoFarmSleep_TwoDistinctHoursPass_SendsStandAndResumesFarm()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            Dispatcher.UIThread.RunJobs();
+            var startHour = GetPrivateField<int?>(viewModel, "_autoFarmSleepLastGameHour") ?? 0;
+
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", startHour + 1);
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmSleepPending"));
+            Assert.True(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", startHour + 2);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmSleepPending"));
+            Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+            Assert.Contains(output, line => line.Contains("stand"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAdvanceAutoFarmSleep_SameHourRepeated_DoesNotCountTwice()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            var startHour = GetPrivateField<int?>(viewModel, "_autoFarmSleepLastGameHour") ?? 0;
+
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", startHour);
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", startHour);
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", startHour);
+
+            Assert.Equal(2, GetPrivateField<int>(viewModel, "_autoFarmSleepHoursRemaining"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TryAdvanceAutoFarmSleep_NotSleeping_DoesNothing()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+
+            InvokePrivate(viewModel, "TryAdvanceAutoFarmSleep", 5);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(output);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task OnCharacterConditionChanged_Sleepy_TriggersSleep()
+    {
+        // Confirms the real GMCP wiring (not just TryAutoFarmSleepOnSleepy called directly).
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+
+            InvokePrivate(viewModel, "OnCharacterConditionChanged", SleepyCondition());
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(output, line => line.Contains("sleep"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task OnWorldTimeChanged_WhileSleeping_AdvancesSleepCounter()
+    {
+        // Confirms the real GMCP wiring (not just TryAdvanceAutoFarmSleep called directly).
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_isConnected", true);
+            viewModel.AutoFarmSleepOnSleepyEnabled = true;
+            InvokePrivate(viewModel, "TryAutoFarmSleepOnSleepy", SleepyCondition().Flags);
+            var startHour = GetPrivateField<int?>(viewModel, "_autoFarmSleepLastGameHour") ?? 0;
+
+            InvokePrivate(viewModel, "OnWorldTimeChanged", new WorldTimeUpdate(
+                Day: null, DayName: null, Era: null, Month: null,
+                Time: startHour + 1, TimeName: null, Year: null));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(1, GetPrivateField<int>(viewModel, "_autoFarmSleepHoursRemaining"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

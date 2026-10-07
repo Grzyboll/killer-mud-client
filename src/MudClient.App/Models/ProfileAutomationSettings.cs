@@ -200,6 +200,11 @@ public sealed class ProfileAutomationSettings
     /// configurable since not every class's prayer skill is named identically.</summary>
     public string AutoFarmPrayerSkillName { get; set; } = "holy prayer";
 
+    /// <summary>Sends "sleep" the moment Char.Condition reports "sleepy", then "stand" once 2
+    /// in-game hours (Mud.TimeInfo) have passed — briefly pausing auto-farm for the night if it's
+    /// running. Works standalone, same reasoning as <see cref="AutoSelfHealEnabled"/>.</summary>
+    public bool AutoFarmSleepOnSleepyEnabled { get; set; }
+
     /// <summary>Sends "stand" as soon as the local character's GMCP position becomes "lying"
     /// (knocked down).</summary>
     public bool AutoStandOnLyingEnabled { get; set; }

@@ -99,6 +99,15 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// means a farm left running unattended doesn't just sit still.</summary>
     private TimeSpan _autoFarmStuckThreshold = TimeSpan.FromSeconds(60);
     private CancellationTokenSource? _autoFarmWatchdogCts;
+    /// <summary>True from the moment <see cref="TryAutoFarmSleepOnSleepy"/> sends "sleep" until
+    /// <see cref="_autoFarmSleepHoursRemaining"/> counts down to zero and "stand" goes out.</summary>
+    private bool _autoFarmSleepPending;
+    /// <summary>In-game hours still to sleep through — starts at 2, decremented by
+    /// <see cref="TryAdvanceAutoFarmSleep"/> each time Mud.TimeInfo reports a new hour.</summary>
+    private int _autoFarmSleepHoursRemaining;
+    /// <summary>The last Mud.TimeInfo hour seen while asleep — counting distinct values instead of
+    /// computing a target hour avoids needing to know this MUD's hour range (0-23, 1-24, ...).</summary>
+    private int? _autoFarmSleepLastGameHour;
     private readonly AutoAssistPolicy _autoAssist = new();
     private readonly GroupExhaustionRefreshPolicy _groupExhaustionRefresh = new();
     private readonly ProfileService _profiles;
@@ -2752,6 +2761,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoFarmSleepOnSleepyEnabled"/>.</summary>
+    public bool AutoFarmSleepOnSleepyEnabled
+    {
+        get => _profileSettings.AutoFarmSleepOnSleepyEnabled;
+        set
+        {
+            if (_profileSettings.AutoFarmSleepOnSleepyEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoFarmSleepOnSleepyEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     public bool AutoStandOnLyingEnabled
     {
         get => _profileSettings.AutoStandOnLyingEnabled;
@@ -3212,6 +3238,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoFarmSustenanceCommandsText));
         OnPropertyChanged(nameof(AutoFarmPrayerEnabled));
         OnPropertyChanged(nameof(AutoFarmPrayerSkillName));
+        OnPropertyChanged(nameof(AutoFarmSleepOnSleepyEnabled));
         OnPropertyChanged(nameof(AutoStandOnLyingEnabled));
         OnPropertyChanged(nameof(AutowieldEnabled));
         OnPropertyChanged(nameof(AutowieldWeaponName));
@@ -7761,6 +7788,60 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Dispatcher.UIThread.Post(ResumeAutoFarm);
     }
 
+    /// <summary>Reacts to Char.Condition reporting "sleepy" — see
+    /// <see cref="AutoFarmSleepOnSleepyEnabled"/>'s own xmldoc. Sends "sleep" once per onset
+    /// (<see cref="_autoFarmSleepPending"/> guards against re-sending while already asleep) and
+    /// pauses auto-farm if it's running; <see cref="TryAdvanceAutoFarmSleep"/> sends "stand" and
+    /// resumes it again once 2 in-game hours have passed.</summary>
+    private void TryAutoFarmSleepOnSleepy(IReadOnlyDictionary<string, bool> conditionFlags)
+    {
+        if (!IsConnected || !AutoFarmSleepOnSleepyEnabled || _autoFarmSleepPending)
+        {
+            return;
+        }
+
+        if (!(conditionFlags.TryGetValue("sleepy", out var sleepy) && sleepy))
+        {
+            return;
+        }
+
+        _autoFarmSleepPending = true;
+        _autoFarmSleepHoursRemaining = 2;
+        _autoFarmSleepLastGameHour = WorldTime.Time;
+        AddToast("Senność — kładę się spać na 2h (w grze).", "info");
+        QueueTriggeredCommands(["sleep"]);
+
+        if (_autoFarmActive && !_autoFarmPaused)
+        {
+            PauseAutoFarm();
+        }
+    }
+
+    /// <summary>Counts down <see cref="_autoFarmSleepHoursRemaining"/> on every distinct
+    /// Mud.TimeInfo hour seen while <see cref="_autoFarmSleepPending"/> — sends "stand" and
+    /// resumes auto-farm once it reaches zero. A no-op whenever nothing is asleep.</summary>
+    private void TryAdvanceAutoFarmSleep(int? gameHour)
+    {
+        if (!_autoFarmSleepPending || gameHour is not { } hour || _autoFarmSleepLastGameHour == hour)
+        {
+            return;
+        }
+
+        _autoFarmSleepLastGameHour = hour;
+        if (--_autoFarmSleepHoursRemaining > 0)
+        {
+            return;
+        }
+
+        _autoFarmSleepPending = false;
+        QueueTriggeredCommands(["stand"]);
+
+        if (_autoFarmActive && _autoFarmPaused)
+        {
+            ResumeAutoFarm();
+        }
+    }
+
     /// <summary>Orders every NPC in the current group (a summoned/charmed pet) to assist as soon
     /// as the local character enters combat. Unlike <see cref="TryAutoOrderGroupPosition"/>,
     /// doesn't require group leadership — ordering your own pet doesn't need it.</summary>
@@ -12159,6 +12240,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void OnWorldTimeChanged(WorldTimeUpdate update)
     {
+        TryAdvanceAutoFarmSleep(update.Time);
+
         Dispatcher.UIThread.Post(() =>
         {
             if (update.Day is { } day) WorldTime.Day = day;
@@ -12247,6 +12330,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         TryAutoAssist();
         _latestConditionFlags = update.Flags;
         TryAutoFarmSustenance(update.Flags);
+        TryAutoFarmSleepOnSleepy(update.Flags);
 
         Dispatcher.UIThread.Post(() =>
         {

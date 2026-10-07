@@ -307,6 +307,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     // keeps _autoFarmVisitedRoomIds/_autoFarmVisitOrder intact so ResumeAutoFarm can pick the
     // route back up instead of the farm starting over from scratch.
     private bool _autoFarmPaused;
+    // True while waiting out _autoFarmRestartDelay after a natural completion (every room in
+    // every region visited) before StartAutoFarm runs again on its own — see ScheduleAutoFarmRestart.
+    // The farm loops this way until the user explicitly stops it; any other stop reason (manual
+    // stop, disconnect, an unrecoverable error) cancels the pending restart instead of scheduling
+    // one, so it never fires after something other than a clean sweep.
+    private bool _autoFarmRestartPending;
+    private CancellationTokenSource? _autoFarmRestartCts;
+    /// <summary>How long a completed farm run waits before restarting itself — a field (not a
+    /// const) so tests can shrink it instead of waiting out the real default.</summary>
+    private TimeSpan _autoFarmRestartDelay = TimeSpan.FromMinutes(2);
     private IReadOnlyList<FarmRegion> _autoFarmRegions = [];
     private HashSet<int> _autoFarmVisitedRoomIds = [];
     // Rooms the stuck-step backstop (HandleAutowalkStepStuck) gave up on during THIS farm run —
@@ -595,7 +605,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         });
         StopAutowalkCommand = new RelayCommand(() => StopAutowalk("Autowalk zatrzymany."));
         StartAutoFarmCommand = new RelayCommand(StartAutoFarm, CanStartAutoFarm);
-        StopAutoFarmCommand = new RelayCommand(() => StopAutoFarm("Farma zatrzymana."), () => _autoFarmActive);
+        StopAutoFarmCommand = new RelayCommand(
+            () => StopAutoFarm("Farma zatrzymana."), () => _autoFarmActive || _autoFarmRestartPending);
         PauseAutoFarmCommand = new RelayCommand(PauseAutoFarm, () => _autoFarmActive && !_autoFarmPaused);
         ResumeAutoFarmCommand = new RelayCommand(ResumeAutoFarm, () => _autoFarmActive && _autoFarmPaused);
         GoToTemporaryTargetCommand = new RelayCommand(() =>
@@ -5464,6 +5475,9 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// <summary>See <see cref="_autoFarmPaused"/>.</summary>
     public bool IsAutoFarmPaused => _autoFarmPaused;
 
+    /// <summary>See <see cref="_autoFarmRestartPending"/>.</summary>
+    public bool IsAutoFarmRestartPending => _autoFarmRestartPending;
+
     public string AutoFarmStatusText
     {
         get => _autoFarmStatusText;
@@ -5716,6 +5730,16 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void StartAutoFarm()
     {
+        // Cancels any pending auto-restart (see ScheduleAutoFarmRestart) regardless of whether
+        // this call is that very restart firing or the user starting a fresh run early — either
+        // way, only one farm run should ever be in flight.
+        _autoFarmRestartCts?.Cancel();
+        if (_autoFarmRestartPending)
+        {
+            _autoFarmRestartPending = false;
+            OnPropertyChanged(nameof(IsAutoFarmRestartPending));
+        }
+
         if (_autoFarmActive)
         {
             return;
@@ -5767,8 +5791,17 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ContinueAutoFarm();
     }
 
-    private void StopAutoFarm(string message)
+    private void StopAutoFarm(string message, bool completedNaturally = false)
     {
+        if (_autoFarmRestartPending)
+        {
+            _autoFarmRestartCts?.Cancel();
+            _autoFarmRestartPending = false;
+            OnPropertyChanged(nameof(IsAutoFarmRestartPending));
+            AddToast("Automatyczne wznowienie farmy odwołane.", "info");
+            RefreshCommands();
+        }
+
         if (!_autoFarmActive)
         {
             return;
@@ -5799,6 +5832,42 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             AddToast(message, "info");
         }
+
+        if (completedNaturally)
+        {
+            ScheduleAutoFarmRestart();
+        }
+    }
+
+    /// <summary>Schedules <see cref="StartAutoFarm"/> to run again after
+    /// <see cref="_autoFarmRestartDelay"/> — called only when <see cref="StopAutoFarm"/> stopped
+    /// for a clean sweep (<c>completedNaturally: true</c>), so the farm loops on respawned mobs
+    /// until the user explicitly stops it (which cancels this via <see cref="StopAutoFarm"/>'s own
+    /// pending-restart check) or starts a fresh run early (via <see cref="StartAutoFarm"/>'s).</summary>
+    private void ScheduleAutoFarmRestart()
+    {
+        _autoFarmRestartCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _autoFarmRestartCts = cts;
+        _autoFarmRestartPending = true;
+        OnPropertyChanged(nameof(IsAutoFarmRestartPending));
+        AutoFarmStatusText = $"Farma wznowi się automatycznie za {_autoFarmRestartDelay.TotalMinutes:0} min.";
+        RefreshCommands();
+        _ = RunAutoFarmRestartAsync(cts.Token);
+    }
+
+    private async Task RunAutoFarmRestartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(_autoFarmRestartDelay, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(StartAutoFarm);
     }
 
     /// <summary>Temporarily halts an active farm run without forgetting its progress — unlike
@@ -6002,7 +6071,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (next is null)
         {
             StopAutoFarm(
-                $"Farma ukończona — odwiedzono wszystkie pokoje w zaznaczonych obszarach ({_autoFarmVisitedRoomIds.Count}).");
+                $"Farma ukończona — odwiedzono wszystkie pokoje w zaznaczonych obszarach ({_autoFarmVisitedRoomIds.Count}).",
+                completedNaturally: true);
             return;
         }
 
@@ -12345,11 +12415,13 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return null;
         }
 
+        var waypoints = DeloopTrailWindow(fromIndex, toIndex);
+
         var steps = new List<MapPathStep>();
         var currentRoom = fromRoom;
-        for (var i = fromIndex; i < toIndex; i++)
+        for (var i = 0; i < waypoints.Count - 1; i++)
         {
-            var nextRoom = index.FindFirstRoomByVnum(_leaderRoomTrail[i + 1]);
+            var nextRoom = index.FindFirstRoomByVnum(waypoints[i + 1]);
             if (nextRoom is null)
             {
                 return null;
@@ -12369,6 +12441,38 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         return new MapPath { From = fromRoom, To = toRoom, Steps = steps, TotalCost = steps.Count };
+    }
+
+    /// <summary>Collapses any backtrack out of <c>_leaderRoomTrail[fromIndex..toIndex]</c> before
+    /// <see cref="TryBuildLeaderTrailPath"/> turns it into steps — without this, a leader who
+    /// ducked into a side room and came back (checking a corpse, a locked door, ...) got replayed
+    /// exactly, sending the follower into the same dead end and back out on every such detour
+    /// (the "swims left-right" report). Standard walk-to-simple-path reduction: the first time a
+    /// room repeats, every entry recorded since its first occurrence is dropped, since the leader
+    /// is now known to have ended up back there anyway.</summary>
+    private List<string> DeloopTrailWindow(int fromIndex, int toIndex)
+    {
+        var waypoints = new List<string>();
+        var positionOf = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = fromIndex; i <= toIndex; i++)
+        {
+            var vnum = _leaderRoomTrail[i];
+            if (positionOf.TryGetValue(vnum, out var priorPosition))
+            {
+                for (var k = waypoints.Count - 1; k > priorPosition; k--)
+                {
+                    positionOf.Remove(waypoints[k]);
+                    waypoints.RemoveAt(k);
+                }
+            }
+            else
+            {
+                positionOf[vnum] = waypoints.Count;
+                waypoints.Add(vnum);
+            }
+        }
+
+        return waypoints;
     }
 
     /// <summary>Pure decision behind <see cref="TryAutoFollowLeader"/>: true for a non-leader group

@@ -689,7 +689,7 @@ public sealed class AutowalkStuckStepTests
             SetPrivateField(viewModel, "_autoFarmActive", true);
             SetPrivateField(viewModel, "_autoFarmSessionExcludedRoomIds", new HashSet<int> { 2 });
 
-            InvokePrivate(viewModel, "StopAutoFarm", "test");
+            InvokePrivate(viewModel, "StopAutoFarm", "test", false);
 
             Assert.Empty(GetPrivateField<HashSet<int>>(viewModel, "_autoFarmSessionExcludedRoomIds"));
         }

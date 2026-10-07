@@ -782,6 +782,42 @@ public sealed class MainWindowViewModelTests : IAsyncDisposable
         Assert.Equal(["2", "3", "4"], path.Steps.Select(step => step.ToRoom.Vnum));
     }
 
+    /// <summary>1-north-2, 2-north-3 (a dead-end side room off 2), 3-south-2, 2-east-4 — lets a
+    /// trail record the leader ducking into 3 and backtracking before continuing to 4.</summary>
+    private static MapIndex CreateDeadEndSideRoomMapIndex() => new(new MapDocument
+    {
+        Areas =
+        [
+            new MapArea
+            {
+                Id = 1,
+                Rooms =
+                [
+                    CreateRoomWithExits(1, "1", ("north", 2)),
+                    CreateRoomWithExits(2, "2", ("south", 1), ("north", 3), ("east", 4)),
+                    CreateRoomWithExits(3, "3", ("south", 2)),
+                    CreateRoomWithExits(4, "4", ("west", 2)),
+                ],
+            },
+        ],
+    });
+
+    [Fact]
+    public void TryBuildLeaderTrailPath_LeaderBacktrackedFromDeadEnd_SkipsTheDetour()
+    {
+        // Regression: the leader walked 1->2->3 (a dead end), then back to 2 and on to 4. Replaying
+        // the trail literally used to send the follower into 3 and back out too (reported as the
+        // character "swimming left-right") — it must instead go straight 1->2->4.
+        SetMapViewModelMapIndex(CreateDeadEndSideRoomMapIndex());
+        GetLeaderRoomTrail().AddRange(["1", "2", "3", "2", "4"]);
+
+        var path = _vm.TryBuildLeaderTrailPath("1", "4");
+
+        Assert.NotNull(path);
+        Assert.Equal(["north", "east"], path!.Steps.Select(step => step.Command));
+        Assert.Equal(["2", "4"], path.Steps.Select(step => step.ToRoom.Vnum));
+    }
+
     [Fact]
     public void TryBuildLeaderTrailPath_ConsecutiveTrailRoomsNotAdjacent_ReturnsNull()
     {

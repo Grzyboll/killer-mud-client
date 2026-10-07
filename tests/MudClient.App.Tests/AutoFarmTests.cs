@@ -801,7 +801,7 @@ public sealed class AutoFarmTests
             InvokePrivate(viewModel, "StartAutoFarm");
             Assert.NotNull(GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder"));
 
-            InvokePrivate(viewModel, "StopAutoFarm", "test");
+            InvokePrivate(viewModel, "StopAutoFarm", "test", false);
 
             Assert.Null(GetPrivateField<IReadOnlyList<MapRoom>?>(viewModel, "_autoFarmVisitOrder"));
         }
@@ -820,7 +820,7 @@ public sealed class AutoFarmTests
         {
             var toastCountBefore = viewModel.Toasts.Count;
 
-            InvokePrivate(viewModel, "StopAutoFarm", "test");
+            InvokePrivate(viewModel, "StopAutoFarm", "test", false);
 
             Assert.False(viewModel.IsAutoFarmActive);
             Assert.Equal(toastCountBefore, viewModel.Toasts.Count);
@@ -918,7 +918,7 @@ public sealed class AutoFarmTests
             InvokePrivate(viewModel, "PauseAutoFarm");
             Assert.True(viewModel.IsAutoFarmPaused);
 
-            InvokePrivate(viewModel, "StopAutoFarm", "test");
+            InvokePrivate(viewModel, "StopAutoFarm", "test", false);
 
             Assert.False(viewModel.IsAutoFarmActive);
             Assert.False(viewModel.IsAutoFarmPaused);
@@ -1886,6 +1886,135 @@ public sealed class AutoFarmTests
             // ResumeAutoFarm clears the pause flag straight back, even though the ContinueAutoFarm
             // call it triggers then stops the farm for lacking map data in this bare-bones setup.
             Assert.False(GetPrivateField<bool>(viewModel, "_autoFarmPaused"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    // ====================================================================
+    // Auto-restart after a natural completion — loops the farm until the user stops it
+    // ====================================================================
+
+    [AvaloniaFact]
+    public async Task StopAutoFarm_CompletedNaturally_SchedulesRestartAndStaysStoppable()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma ukończona.", true);
+
+            Assert.True(viewModel.IsAutoFarmRestartPending);
+            Assert.False(viewModel.IsAutoFarmActive);
+            Assert.True(viewModel.StopAutoFarmCommand.CanExecute(null));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StopAutoFarm_NotCompletedNaturally_DoesNotScheduleRestart()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma zatrzymana.", false);
+
+            Assert.False(viewModel.IsAutoFarmRestartPending);
+            Assert.False(viewModel.StopAutoFarmCommand.CanExecute(null));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StopAutoFarm_WhileRestartPending_CancelsIt()
+    {
+        // The Stop button's own action — it must be able to cancel a pending restart even though
+        // the farm itself already shows as inactive at that point.
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma ukończona.", true);
+            Assert.True(viewModel.IsAutoFarmRestartPending);
+
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma zatrzymana.", false);
+
+            Assert.False(viewModel.IsAutoFarmRestartPending);
+            Assert.Contains(viewModel.Toasts, toast => toast.Text.Contains("odwołane"));
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StartAutoFarm_WhileRestartPending_CancelsIt()
+    {
+        // Starting a fresh run early (the user doesn't want to wait out the 2 minutes) must not
+        // leave the scheduled restart to also fire later on top of it.
+        var viewModel = CreateViewModel(out var directory);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma ukończona.", true);
+            Assert.True(viewModel.IsAutoFarmRestartPending);
+
+            InvokePrivate(viewModel, "StartAutoFarm");
+
+            Assert.False(viewModel.IsAutoFarmRestartPending);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task RunAutoFarmRestartAsync_DelayElapses_StartsAutoFarmAgain()
+    {
+        var viewModel = CreateViewModel(out var directory);
+        var output = new List<string>();
+        viewModel.OutputReceived += text => output.Add(text);
+        try
+        {
+            SetPrivateField(viewModel, "_autoFarmActive", true);
+            SetPrivateField(viewModel, "_autoFarmRestartDelay", TimeSpan.FromMilliseconds(10));
+            InvokePrivate(viewModel, "StopAutoFarm", "Farma ukończona.", true);
+            Assert.True(viewModel.IsAutoFarmRestartPending);
+
+            var cts = GetPrivateField<CancellationTokenSource>(viewModel, "_autoFarmRestartCts");
+            var task = (Task)typeof(MainWindowViewModel)
+                .GetMethod("RunAutoFarmRestartAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(viewModel, [cts.Token])!;
+            await task;
+            Dispatcher.UIThread.RunJobs();
+
+            // No map/region is configured in this bare-bones test, so StartAutoFarm bails out
+            // with its own error toast — but that only happens if it actually ran, which is what
+            // this test is really checking.
+            Assert.False(viewModel.IsAutoFarmRestartPending);
+            Assert.Contains(viewModel.Toasts, toast => toast.Text.Contains("zaznacz obszar farmy"));
         }
         finally
         {

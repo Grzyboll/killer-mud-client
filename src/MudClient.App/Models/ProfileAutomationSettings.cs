@@ -251,6 +251,13 @@ public sealed class ProfileAutomationSettings
         "put all.klej {klej}\n" +
         "put all.gem {gem}";
 
+    /// <summary>Also scans each "/autoget" "exa"/"examine" response for an item tagged "(pulsuje)"
+    /// (this MUD's generic marker for a magically-charged item — see
+    /// <see cref="Core.Automation.PulsingItemPolicy"/>) and sends "get &lt;keyword&gt; &lt;cel&gt;"
+    /// for each one found, alongside the existing random-book pickup. Off by default, same
+    /// reasoning as <see cref="AutoGetEnabled"/>.</summary>
+    public bool AutoGetPulsingItemsEnabled { get; set; }
+
     /// <summary>Container "{klej}" resolves to in <see cref="AutoGetCommandsText"/> and
     /// <see cref="AutoJubilerCommandsText"/> — where looted "all.klej" gets put, and where
     /// "/jubiler" later takes it back out from to sell. One shared variable instead of the same

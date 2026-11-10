@@ -1,19 +1,30 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using MudClient.Core.Automation;
 using MudClient.Core.Killeropedia;
 
 namespace MudClient.App.Services;
+
+/// <summary>Everything <see cref="AutoGetCoordinator.RunAsync"/> picked up beyond the configured
+/// command list itself — a random book (see <see cref="RandomBookNaming"/>), or a "(pulsuje)"
+/// item (see <see cref="PulsingItemPolicy"/>) when that scan is enabled.</summary>
+public sealed record AutoGetPickupResult(IReadOnlyList<string> BookNames, IReadOnlyList<string> PulsingItemKeywords)
+{
+    public static readonly AutoGetPickupResult Empty = new([], []);
+}
 
 /// <summary>
 /// Runs the "/autoget" meta-command's configured command list, one command at a time. Most lines
 /// are just forwarded verbatim, but any "exa &lt;cel&gt;"/"examine &lt;cel&gt;" line has its
 /// response captured and scanned for a random magic-book name (see
 /// <see cref="RandomBookNaming.FindBookNames"/> — Killeropedia's algorithmic random-book word
-/// pools, e.g. "duża księga triumfu"); each match found gets a "get &lt;księga&gt; &lt;cel&gt;"
-/// command sent right after, so a book revealed by examining a corpse actually gets picked up
-/// instead of just sitting there. Everything else in the list is fire-and-forget, same as before —
-/// only "exa" lines need to wait for and read a response.
+/// pools, e.g. "duża księga triumfu") and, when <see cref="RunAsync"/>'s
+/// <c>includePulsingItems</c> is set, a "(pulsuje)" item (see
+/// <see cref="PulsingItemPolicy.FindPulsingItemKeywords"/>); each match found gets a
+/// "get &lt;keyword&gt; &lt;cel&gt;" command sent right after, so an item revealed by examining a
+/// corpse actually gets picked up instead of just sitting there. Everything else in the list is
+/// fire-and-forget, same as before — only "exa" lines need to wait for and read a response.
 /// </summary>
 public sealed class AutoGetCoordinator
 {
@@ -79,15 +90,18 @@ public sealed class AutoGetCoordinator
     }
 
     /// <summary>Sends every command in <paramref name="commands"/>, in order. Returns every random
-    /// book name picked up along the way (empty when none were found).</summary>
-    public async Task<IReadOnlyList<string>> RunAsync(
+    /// book name and (when <paramref name="includePulsingItems"/> is set) "(pulsuje)" item keyword
+    /// picked up along the way (both empty when none were found).</summary>
+    public async Task<AutoGetPickupResult> RunAsync(
         IReadOnlyList<string> commands,
         Func<string, CancellationToken, Task> sendCommandAsync,
+        bool includePulsingItems = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sendCommandAsync);
 
         var pickedUpBooks = new List<string>();
+        var pickedUpPulsingItems = new List<string>();
         foreach (var command in commands)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -105,9 +119,20 @@ public sealed class AutoGetCoordinator
                 pickedUpBooks.Add(bookName);
                 await sendCommandAsync($"get {bookName} {target}", cancellationToken).ConfigureAwait(false);
             }
+
+            if (!includePulsingItems)
+            {
+                continue;
+            }
+
+            foreach (var keyword in responseLines.SelectMany(PulsingItemPolicy.FindPulsingItemKeywords))
+            {
+                pickedUpPulsingItems.Add(keyword);
+                await sendCommandAsync($"get {keyword} {target}", cancellationToken).ConfigureAwait(false);
+            }
         }
 
-        return pickedUpBooks;
+        return new AutoGetPickupResult(pickedUpBooks, pickedUpPulsingItems);
     }
 
     /// <summary>"exa cia"/"examine cia" → target "cia"; anything else (including "exa" with no

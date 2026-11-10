@@ -53,7 +53,8 @@ public sealed class AutoGetCoordinatorTests
             ["get all.klej cia", "get all.gem cia", "put all.klej 2.tor"],
             (command, _) => { sent.Add(command); return Task.CompletedTask; });
 
-        Assert.Empty(picked);
+        Assert.Empty(picked.BookNames);
+        Assert.Empty(picked.PulsingItemKeywords);
         Assert.Equal(["get all.klej cia", "get all.gem cia", "put all.klej 2.tor"], sent);
     }
 
@@ -76,7 +77,7 @@ public sealed class AutoGetCoordinatorTests
 
         var picked = await coordinator.RunAsync(["exa cia", "put all.klej 2.tor"], Send);
 
-        Assert.Equal(["duza ksiega triumfu"], picked);
+        Assert.Equal(["duza ksiega triumfu"], picked.BookNames);
         Assert.Equal(["exa cia", "get duza ksiega triumfu cia", "put all.klej 2.tor"], sent);
     }
 
@@ -99,7 +100,7 @@ public sealed class AutoGetCoordinatorTests
 
         var picked = await coordinator.RunAsync(["exa cia", "put all.klej 2.tor"], Send);
 
-        Assert.Empty(picked);
+        Assert.Empty(picked.BookNames);
         Assert.Equal(["exa cia", "put all.klej 2.tor"], sent);
     }
 
@@ -122,7 +123,7 @@ public sealed class AutoGetCoordinatorTests
 
         var picked = await coordinator.RunAsync(["exa cia"], Send);
 
-        Assert.Equal(["duza ksiega triumfu", "mala ksiazka lasu"], picked);
+        Assert.Equal(["duza ksiega triumfu", "mala ksiazka lasu"], picked.BookNames);
         Assert.Equal(
             ["exa cia", "get duza ksiega triumfu cia", "get mala ksiazka lasu cia"],
             sent);
@@ -151,8 +152,83 @@ public sealed class AutoGetCoordinatorTests
 
         var picked = await coordinator.RunAsync(["exa cia", "exa kosc"], Send);
 
-        Assert.Equal(["duza ksiega triumfu"], picked);
+        Assert.Equal(["duza ksiega triumfu"], picked.BookNames);
         Assert.Equal(["exa cia", "get duza ksiega triumfu cia", "exa kosc"], sent);
+    }
+
+    // ====================================================================
+    // RunAsync — "(pulsuje)" items (includePulsingItems)
+    // ====================================================================
+
+    [Fact]
+    public async Task RunAsync_PulsingItemButFlagOff_DoesNotGetIt()
+    {
+        var coordinator = CreateFastCoordinator();
+        var sent = new List<string>();
+
+        Task Send(string command, CancellationToken token)
+        {
+            sent.Add(command);
+            if (command == "exa cia")
+            {
+                coordinator.TryCaptureLine("Na trupie: (pulsuje) helm z czaszki smoka.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        var picked = await coordinator.RunAsync(["exa cia"], Send);
+
+        Assert.Empty(picked.PulsingItemKeywords);
+        Assert.Equal(["exa cia"], sent);
+    }
+
+    [Fact]
+    public async Task RunAsync_PulsingItemWithFlagOn_InsertsAGetRightAfterTheExamine()
+    {
+        var coordinator = CreateFastCoordinator();
+        var sent = new List<string>();
+
+        Task Send(string command, CancellationToken token)
+        {
+            sent.Add(command);
+            if (command == "exa cia")
+            {
+                coordinator.TryCaptureLine("Na trupie: (pulsuje) helm z czaszki smoka.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        var picked = await coordinator.RunAsync(["exa cia", "put all.klej 2.tor"], Send, includePulsingItems: true);
+
+        Assert.Equal(["helm"], picked.PulsingItemKeywords);
+        Assert.Equal(["exa cia", "get helm cia", "put all.klej 2.tor"], sent);
+    }
+
+    [Fact]
+    public async Task RunAsync_PulsingItemAndBookInTheSameResponse_GetsBothWithBooksFirst()
+    {
+        var coordinator = CreateFastCoordinator();
+        var sent = new List<string>();
+
+        Task Send(string command, CancellationToken token)
+        {
+            sent.Add(command);
+            if (command == "exa cia")
+            {
+                coordinator.TryCaptureLine("Nosisz: duza ksiega triumfu.");
+                coordinator.TryCaptureLine("Na trupie: (pulsuje) helm z czaszki smoka.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        var picked = await coordinator.RunAsync(["exa cia"], Send, includePulsingItems: true);
+
+        Assert.Equal(["duza ksiega triumfu"], picked.BookNames);
+        Assert.Equal(["helm"], picked.PulsingItemKeywords);
+        Assert.Equal(["exa cia", "get duza ksiega triumfu cia", "get helm cia"], sent);
     }
 
     [Fact]

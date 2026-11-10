@@ -53,6 +53,11 @@
                       Content="/autoget — zbierz i posortuj łup" />
             <TextBlock Classes="mud-faint" TextWrapping="Wrap"
                        Text="Wysyła poniższe komendy po jednej w wierszu, w podanej kolejności — „{klej}”/„{gem}” są zamieniane na kontenery ustawione wyżej. Każda linia „exa”/„examine” czeka na odpowiedź i sprawdza ją pod kątem losowej księgi z Killeropedii (np. „duża księga triumfu”) — jeśli się znajdzie, dokłada „get &lt;księga&gt; &lt;cel&gt;”. Uruchamia się też automatycznie po komunikacie „Zdobyłeś &lt;liczba&gt; punktów doświadczenia.” (czyli po każdym zabiciu). Musi być zaznaczone, zanim komenda „/autoget” (pasek komend, timery, triggery, aliasy) albo świeże zabicie cokolwiek zrobi." />
+            <CheckBox Margin="0,6,0,0"
+                      IsChecked="{Binding AutoGetPulsingItemsEnabled}"
+                      Content="Zabieraj też przedmioty „(pulsuje)”" />
+            <TextBlock Classes="mud-faint" TextWrapping="Wrap"
+                       Text="Każda linia „exa”/„examine” jest też sprawdzana pod kątem przedmiotu oznaczonego „(pulsuje)” (np. „(pulsuje) helm z czaszki smoka”) — zamiast samego „pulsuje” (które nie jest słowem kluczowym przedmiotu) dokłada „get” na pierwszym słowie jego nazwy (tu: „helm”)." />
             <TextBlock Margin="0,6,0,0" Text="Komendy" />
             <TextBox Text="{Binding AutoGetCommandsText, UpdateSourceTrigger=PropertyChanged}"
                      AcceptsReturn="True"

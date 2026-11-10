@@ -2862,6 +2862,23 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>See <see cref="ProfileAutomationSettings.AutoGetPulsingItemsEnabled"/>.</summary>
+    public bool AutoGetPulsingItemsEnabled
+    {
+        get => _profileSettings.AutoGetPulsingItemsEnabled;
+        set
+        {
+            if (_profileSettings.AutoGetPulsingItemsEnabled == value)
+            {
+                return;
+            }
+
+            _profileSettings.AutoGetPulsingItemsEnabled = value;
+            OnPropertyChanged();
+            SaveActiveProfile();
+        }
+    }
+
     /// <summary>See <see cref="ProfileAutomationSettings.AutoLootGlueContainerName"/>.</summary>
     public string AutoLootGlueContainerName
     {
@@ -3245,6 +3262,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoRepairEnabled));
         OnPropertyChanged(nameof(AutoGetEnabled));
         OnPropertyChanged(nameof(AutoGetCommandsText));
+        OnPropertyChanged(nameof(AutoGetPulsingItemsEnabled));
         OnPropertyChanged(nameof(AutoLootGlueContainerName));
         OnPropertyChanged(nameof(AutoLootGemContainerName));
         OnPropertyChanged(nameof(AutoJubilerEnabled));
@@ -7300,10 +7318,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     /// The "/autoget" meta-command: sends <see cref="AutoGetCommandsText"/> one line per command,
     /// in order — e.g. loot specific items off a corpse and sort them into a bag. Unlike "/jubiler"
     /// this can't be a plain fire-and-forget list: any "exa"/"examine" line needs its response
-    /// captured and scanned for a random magic-book name (see <see cref="AutoGetCoordinator"/>), so
-    /// a book revealed by examining the corpse actually gets picked up instead of just sitting
-    /// there. Gated behind <see cref="AutoGetEnabled"/> for the same accidental-keystroke reason
-    /// "/repair" is gated behind <see cref="AutoRepairEnabled"/>.
+    /// captured and scanned for a random magic-book name and, when
+    /// <see cref="AutoGetPulsingItemsEnabled"/> is on, a "(pulsuje)" item (see
+    /// <see cref="AutoGetCoordinator"/>), so either one revealed by examining the corpse actually
+    /// gets picked up instead of just sitting there. Gated behind <see cref="AutoGetEnabled"/> for
+    /// the same accidental-keystroke reason "/repair" is gated behind <see cref="AutoRepairEnabled"/>.
     /// </summary>
     private async Task AutoGetAllAsync()
     {
@@ -7336,11 +7355,18 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _autoGetRunning = true;
         try
         {
-            var pickedUpBooks = await _autoGetCoordinator.RunAsync(commands, SendTriggeredCommandAsync);
-            if (pickedUpBooks.Count > 0)
+            var pickup = await _autoGetCoordinator.RunAsync(commands, SendTriggeredCommandAsync, AutoGetPulsingItemsEnabled);
+            if (pickup.BookNames.Count > 0)
             {
                 AddToast(
-                    $"/autoget: znaleziono i pobrano {pickedUpBooks.Count} losowych ksiąg ({string.Join(", ", pickedUpBooks)}).",
+                    $"/autoget: znaleziono i pobrano {pickup.BookNames.Count} losowych ksiąg ({string.Join(", ", pickup.BookNames)}).",
+                    "info");
+            }
+
+            if (pickup.PulsingItemKeywords.Count > 0)
+            {
+                AddToast(
+                    $"/autoget: znaleziono i pobrano {pickup.PulsingItemKeywords.Count} pulsujących przedmiotów ({string.Join(", ", pickup.PulsingItemKeywords)}).",
                     "info");
             }
         }

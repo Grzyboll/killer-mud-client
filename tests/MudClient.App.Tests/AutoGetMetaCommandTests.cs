@@ -234,6 +234,71 @@ public sealed class AutoGetMetaCommandTests
     }
 
     [AvaloniaFact]
+    public async Task TriggeredAutoGetCommand_PulsingItemButSettingOff_DoesNotSendGet()
+    {
+        var (viewModel, directory, coordinator) = CreateViewModel();
+        var output = new List<string>();
+        viewModel.OutputReceived += output.Add;
+
+        try
+        {
+            SetConnected(viewModel);
+            viewModel.AutoGetEnabled = true;
+            viewModel.AutoGetPulsingItemsEnabled = false;
+            viewModel.AutoGetCommandsText = "exa cia\nput all.klej {klej}";
+
+            var task = InvokeSendTriggeredCommandAsync(viewModel, "/autoget");
+            await WaitUntilCapturingAsync(coordinator);
+            coordinator.TryCaptureLine("Na trupie: (pulsuje) helm z czaszki smoka.");
+
+            await task;
+            PumpTriggerQueue();
+
+            Assert.DoesNotContain(output, l => l.Contains("> get ", StringComparison.Ordinal));
+            Assert.DoesNotContain(viewModel.Toasts, t => t.Text.Contains("pulsujących"));
+        }
+        finally
+        {
+            await DisposeAsync(viewModel, directory);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TriggeredAutoGetCommand_PulsingItemWithSettingOn_GetsItFromTheExaminedTarget()
+    {
+        var (viewModel, directory, coordinator) = CreateViewModel();
+        var output = new List<string>();
+        viewModel.OutputReceived += output.Add;
+
+        try
+        {
+            SetConnected(viewModel);
+            viewModel.AutoGetEnabled = true;
+            viewModel.AutoGetPulsingItemsEnabled = true;
+            viewModel.AutoGetCommandsText = "exa cia\nput all.klej {klej}";
+
+            var task = InvokeSendTriggeredCommandAsync(viewModel, "/autoget");
+            await WaitUntilCapturingAsync(coordinator);
+            coordinator.TryCaptureLine("Na trupie: (pulsuje) helm z czaszki smoka.");
+
+            await task;
+            PumpTriggerQueue();
+
+            Assert.Contains(output, l => l.Contains("> get helm cia", StringComparison.Ordinal));
+            Assert.Contains(viewModel.Toasts, t =>
+                t.Text.Contains("znaleziono i pobrano 1") && t.Text.Contains("helm") && t.Text.Contains("pulsujących"));
+
+            var getIndex = output.FindIndex(l => l.Contains("> get helm cia", StringComparison.Ordinal));
+            var putIndex = output.FindIndex(l => l.Contains("> put all.klej 2.tor", StringComparison.Ordinal));
+            Assert.True(getIndex >= 0 && putIndex >= 0 && getIndex < putIndex);
+        }
+        finally
+        {
+            await DisposeAsync(viewModel, directory);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task ExperienceGainLine_WhileArmedAndConnected_TriggersAutoGetAutomatically()
     {
         var (viewModel, directory, _) = CreateViewModel();

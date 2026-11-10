@@ -55,6 +55,48 @@
 </header>
 <main class="wrap">
   <article class="release">
+    <h2><a href="https://github.com/Grzyboll/killer-mud-client/releases/tag/v0.9.0-dev.1">v0.9.0-dev.1</a> <span class="pre">dev</span><span class="date">2026-11-10</span></h2>
+    <div class="notes">
+        <h3>✨ Nowości</h3>
+        <ul>
+          <li>auto-farm sleeps for 2 in-game hours when Senność is reported</li>
+          <li>auto-pause and resume auto-farm when it's made no progress in 60s</li>
+          <li>missing buffs first in Buffy, collapsible Mem panel sections</li>
+          <li>show the Efekty list directly under Kondycja</li>
+          <li>merge Effects and Kondycja into the Mem/Buffy panel</li>
+          <li>auto-farm eats/drinks on Hunger/Thirst, prays when ready</li>
+          <li>autofollow retraces the leader's actual steps, not the shortest path</li>
+          <li>quick recording toggle next to Wyslij; fix(travel): stop retrying door commands mid-fight</li>
+          <li>auto-farm can order the group to rest before each room hop</li>
+          <li>heal orders can also re-mem the spell on the companion</li>
+          <li>session recording to file, configurable scrollback line limit</li>
+          <li>add cut/paste for local markers</li>
+          <li>import community markers from issues #56 and #89</li>
+          <li>order group to heal when own HP drops below the farm threshold</li>
+          <li>skill sequence after combat start; session-scoped stuck-room exclusion; single farm-region removal</li>
+          <li>Auto: Ekwipunek module, auto-farm pause, autowalk fix</li>
+          <li>readable teacher skills + mem/circle indicators</li>
+        </ul>
+        <h3>🐛 Poprawki</h3>
+        <ul>
+          <li>recover from a gate that never actually opens</li>
+          <li>de-loop the leader's trail; feat(automation): loop auto-farm after completion</li>
+          <li>autofollow recomputes along the leader's trail when it drifts off route</li>
+          <li>mirror say/tell lines while a capture is active; compact Kondycja/Efekty</li>
+          <li>sustenance casts after a mem and re-checks on mem updates</li>
+          <li>autofollow redirects mid-walk when the leader moves again</li>
+          <li>heal-order casts correctly, move it to Farm panel, add self-heal without farming</li>
+          <li>TRANSPARENCY overlay arrangement now survives saving/reloading a layout</li>
+        </ul>
+        <h3>🔧 Pozostałe zmiany</h3>
+        <ul>
+          <li>keep the saved buff order instead of sorting missing buffs first</li>
+          <li>clarify that self-buffs stay maintained continuously, not just at combat start</li>
+        </ul>
+        <p class="ghlink"><a href="https://github.com/Grzyboll/killer-mud-client/releases/tag/v0.9.0-dev.1">Szczegóły na GitHubie →</a></p>
+      </div>
+    </article>
+  <article class="release">
     <h2><a href="https://github.com/Grzyboll/killer-mud-client/releases/tag/v0.8.4-dev.1">v0.8.4-dev.1</a> <span class="pre">dev</span><span class="date">2026-08-27</span></h2>
     <div class="notes">
         <h3>🔧 Pozostałe zmiany</h3>

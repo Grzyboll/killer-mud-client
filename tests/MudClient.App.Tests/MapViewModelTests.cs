@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Text.Json;
 using MudClient.App.Models;
+using MudClient.App.Services;
 using MudClient.App.ViewModels;
 using MudClient.Core.Gmcp;
 using MudClient.Core.Map;
@@ -1376,6 +1377,126 @@ public sealed class MapViewModelTests
         vm.SetMarkerOnSelectedRoomCommand.Execute("R");
 
         Assert.True(vm.ReportMarkersCommand.CanExecute(null));
+    }
+
+    // ====================================================================
+    // ReportMarkers end-to-end (the command's actual body, not just the pure
+    // ComputeMarkerReportDiff/BuildMarkerReportIssueUri helpers above) — exercises it against the
+    // real embedded map-markers-shared.json, the same data a live run reports against.
+    // ====================================================================
+
+    private sealed class FakeExternalLinkService : IExternalLinkService
+    {
+        public Uri? LastOpenedUri { get; private set; }
+
+        public void Open(Uri uri) => LastOpenedUri = uri;
+    }
+
+    private static (MapViewModel Map, MainWindowViewModel Main, FakeExternalLinkService Links) CreateReportableViewModels(
+        string dataRoot)
+    {
+        var links = new FakeExternalLinkService();
+        var main = new MainWindowViewModel(
+            settingsService: new AppSettingsService(dataRoot),
+            externalLinkService: links);
+        var map = new MapViewModel("C:\\dummy", new GmcpLocationResolver(), dataRoot) { MainViewModel = main };
+        return (map, main, links);
+    }
+
+    [Fact]
+    public async Task ReportMarkers_NewLocalMarker_OpensIssueUriDescribingIt()
+    {
+        // vnum "100" (CreateSampleRoom's own vnum) is not in the real shared catalog.
+        var dataRoot = Path.Combine(Path.GetTempPath(), "KillerMudClient_ReportMarkersTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        try
+        {
+            var (map, main, links) = CreateReportableViewModels(dataRoot);
+            try
+            {
+                map.SelectedRoom = CreateSampleRoom();
+                map.SetMarkerOnSelectedRoomCommand.Execute("R");
+
+                map.ReportMarkersCommand.Execute(null);
+
+                Assert.NotNull(links.LastOpenedUri);
+                var body = Uri.UnescapeDataString(links.LastOpenedUri!.Query);
+                Assert.Contains("[NOWY] vnum 100 -> R", body);
+                Assert.DoesNotContain(main.Toasts, toast => toast.Text.Contains("już znane społeczności"));
+            }
+            finally
+            {
+                map.Dispose();
+                await main.DisposeAsync();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dataRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReportMarkers_SymbolChangedForAKnownSharedVnum_OpensIssueUriDescribingTheChange()
+    {
+        // vnum "17151" is a real entry in map-markers-shared.json with symbol "D" — marking it
+        // locally with a different symbol must surface as [ZMIANA], not get silently skipped.
+        var dataRoot = Path.Combine(Path.GetTempPath(), "KillerMudClient_ReportMarkersTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        try
+        {
+            var (map, main, links) = CreateReportableViewModels(dataRoot);
+            try
+            {
+                map.SelectedRoom = RoomWithVnum(2, 1, "17151", new MapCoordinates(0, 0, 0));
+                map.SetMarkerOnSelectedRoomCommand.Execute("X");
+
+                map.ReportMarkersCommand.Execute(null);
+
+                Assert.NotNull(links.LastOpenedUri);
+                var body = Uri.UnescapeDataString(links.LastOpenedUri!.Query);
+                Assert.Contains("[ZMIANA] vnum 17151: D -> X", body);
+            }
+            finally
+            {
+                map.Dispose();
+                await main.DisposeAsync();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dataRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReportMarkers_LocalMarkerIdenticalToShared_ShowsAlreadyKnownToastAndOpensNoLink()
+    {
+        var dataRoot = Path.Combine(Path.GetTempPath(), "KillerMudClient_ReportMarkersTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dataRoot);
+        try
+        {
+            var (map, main, links) = CreateReportableViewModels(dataRoot);
+            try
+            {
+                map.SelectedRoom = RoomWithVnum(2, 1, "17151", new MapCoordinates(0, 0, 0));
+                map.SetMarkerOnSelectedRoomCommand.Execute("D");
+
+                map.ReportMarkersCommand.Execute(null);
+
+                Assert.Null(links.LastOpenedUri);
+                Assert.Contains(main.Toasts, toast => toast.Text.Contains("już znane społeczności"));
+            }
+            finally
+            {
+                map.Dispose();
+                await main.DisposeAsync();
+            }
+        }
+        finally
+        {
+            Directory.Delete(dataRoot, recursive: true);
+        }
     }
 
     // ====================================================================
